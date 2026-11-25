@@ -14,7 +14,18 @@ Web app (PWA) quản lý chi tiêu từ file sao kê ngân hàng/ví. File đư�
   - Hoàn tiền / trả hàng làm giảm chi của danh mục.
 - [x] **Báo cáo**: tiền vào, tiền ra, chênh lệch; chi theo danh mục; thu theo nguồn; biểu đồ và bảng theo tháng.
 - [x] **Backup**: xuất file `.ctgd` đã mã hóa, nhập để gộp dữ liệu hoặc khôi phục trên máy mới.
-- [ ] Đưa lên HTTPS (ví dụ GitHub Pages) để cài lên điện thoại
+- [x] **Đã đưa lên GitHub Pages:** https://lalaxinhdep.github.io/chi-tieu-gia-dinh/
+
+## Cài lên điện thoại
+
+- **Android (Chrome):** mở địa chỉ trên → menu ⋮ → **Cài đặt ứng dụng** (hoặc **Thêm vào màn hình chính**).
+- **iPhone (Safari):** mở địa chỉ trên → nút Chia sẻ → **Thêm vào MH chính**.
+
+Mỗi thiết bị có kho dữ liệu riêng. Muốn chuyển dữ liệu sang máy khác: xuất backup ở máy cũ, rồi chọn "Khôi phục từ backup" ở màn hình đầu của máy mới.
+
+## Cập nhật app
+
+Sửa code rồi chạy `git add -A`, `git commit -m "..."`, `git push`. GitHub Pages tự cập nhật sau khoảng 1 phút. Nhớ tăng `VERSION` trong `sw.js` để điện thoại tải bản mới.
 
 ## Chạy thử trên máy tính
 
