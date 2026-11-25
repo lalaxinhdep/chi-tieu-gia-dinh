@@ -10,6 +10,7 @@ export function monthsAvailable(txs) {
 export function summarize(txs, month) {
   const list = month ? txs.filter((t) => t.date.startsWith(month)) : txs;
   let income = 0, expense = 0, excluded = 0, excludedCount = 0, uncategorized = 0, ignoredCount = 0;
+  const excludedByKind = {};
   const byCat = new Map();
   const incomeByCat = new Map();
   for (const t of list) {
@@ -24,11 +25,13 @@ export function summarize(txs, month) {
       excluded += Math.abs(t.amount);
       excludedCount++;
       if (t.kind === 'ignore') ignoredCount++;
+      const e = excludedByKind[t.kind] ||= { count: 0, total: 0 };
+      e.count++; e.total += Math.abs(t.amount);
     }
   }
   const sortDesc = (m) => [...m.entries()].map(([category, total]) => ({ category, total })).sort((a, b) => b.total - a.total);
   return {
-    income, expense, net: income - expense, excluded, excludedCount, uncategorized, ignoredCount,
+    income, expense, net: income - expense, excluded, excludedCount, uncategorized, ignoredCount, excludedByKind,
     categories: sortDesc(byCat), incomeCategories: sortDesc(incomeByCat), count: list.length,
   };
 }

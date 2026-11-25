@@ -219,12 +219,12 @@ function renderOverview() {
   const months12 = byMonth(txs).slice(-12);
   $('#ovBody').innerHTML = `
     <dl class="kpis">
-      <div class="card kpi"><dt>Tiền vào</dt><dd class="in">${fmtMoney(s.income)}</dd></div>
-      <div class="card kpi"><dt>Tiền ra</dt><dd class="out">${fmtMoney(s.expense)}</dd></div>
-      <div class="card kpi net"><dt>Chênh lệch</dt><dd>${fmtSigned(s.net)}</dd></div>
+      <div class="card kpi clickable" data-kpi="income" role="button" tabindex="0" title="Xem các khoản tiền vào"><dt>Tiền vào ›</dt><dd class="in">${fmtMoney(s.income)}</dd></div>
+      <div class="card kpi clickable" data-kpi="expense" role="button" tabindex="0" title="Xem các khoản tiền ra"><dt>Tiền ra ›</dt><dd class="out">${fmtMoney(s.expense)}</dd></div>
+      <div class="card kpi net clickable" data-kpi="counted" role="button" tabindex="0" title="Xem mọi khoản có tính"><dt>Chênh lệch ›</dt><dd>${fmtSigned(s.net)}</dd></div>
     </dl>
     ${s.uncategorized ? `<p class="notice">Có ${s.uncategorized} giao dịch chưa phân loại. <button type="button" data-uncat>Phân loại ngay</button>. App sẽ nhớ cho những lần sau.</p>` : ''}
-    <p class="muted small">Không tính ${s.excludedCount} giao dịch (${fmtMoney(s.excluded)} đ) là trả nợ thẻ, chuyển nội bộ, tiết kiệm hoặc đã loại khỏi báo cáo${s.ignoredCount ? ` (<button type="button" class="link" data-ignored>${s.ignoredCount} khoản bạn tự loại</button>)` : ''}.</p>
+    ${excludedNote(s)}
     <div class="card">
       <h2>Chi theo danh mục</h2>
       <div class="bars">${catRows || '<p class="empty">Không có khoản chi.</p>'}</div>
@@ -248,6 +248,25 @@ function renderOverview() {
 }
 
 const lots = (n) => `${n} lần`;
+
+// Giải thích vì sao có giao dịch không tính vào Tiền vào / Tiền ra, tách theo từng loại.
+const EXCLUDED_WHY = {
+  cc_payment: ['trả nợ thẻ tín dụng', 'tiền quẹt thẻ đã tính ở từng món mua, tính thêm khoản trả nợ là trùng'],
+  transfer: ['chuyển giữa tài khoản trong gia đình', 'tiền chỉ đổi chỗ, không phải chi hay thu; gồm cả món mua đã chuyển sang trả góp (tính theo từng kỳ)'],
+  savings: ['gửi / rút tiết kiệm', 'tiền vẫn là của mình, xem ở thẻ Tiết kiệm'],
+  ignore: ['bạn tự loại khỏi báo cáo', 'ví dụ chuyển nhầm rồi trả lại'],
+};
+function excludedNote(s) {
+  if (!s.excludedCount) return '';
+  const items = Object.entries(EXCLUDED_WHY).filter(([k]) => s.excludedByKind[k]).map(([k, [label, why]]) => {
+    const e = s.excludedByKind[k];
+    return `<li><button type="button" class="link" data-excl="${k}">${e.count} lần ${label}</button>: ${fmtMoney(e.total)} đ. <span class="muted">${why}.</span></li>`;
+  }).join('');
+  return `<details class="excluded-note small"><summary>Có ${s.excludedCount} giao dịch (${fmtMoney(s.excluded)} đ) không tính vào Tiền vào / Tiền ra để tránh tính trùng. Vì sao?</summary>
+      <ul>${items}</ul>
+      <p class="muted">Bấm từng dòng để xem giao dịch. Thấy khoản nào xếp sai thì mở giao dịch đó và đổi lại loại.</p>
+    </details>`;
+}
 // "NGAN HANG TMCP NGOAI THUONG VIET NAM (VIETCOMBANK)" → "VIETCOMBANK"
 const shortBank = (b) => b.split(', ').map((x) => x.match(/\(([^)]+)\)/)?.[1] || x.replace(/^NGAN HANG (TMCP )?/i, '')).join(', ');
 
@@ -313,7 +332,9 @@ function savingsCard(month) {
     </div>`;
 }
 
-function openTx({ kind = '', cat = '', acc = '', party = null } = {}) {
+function openTx({ kind = '', cat = '', acc = '', party = null, dir = '' } = {}) {
+  $('#fDir').value = dir;
+  $('#fSort').value = 'new';
   partyFilter = party;
   go('tx');
   fillTxFilters();
@@ -331,7 +352,10 @@ $('#ovBody').addEventListener('click', async (e) => {
   const row = e.target.closest('.bar-row');
   if (row) return openTx({ kind: row.dataset.kind || 'expense', cat: row.dataset.cat });
   if (e.target.closest('[data-uncat]')) return openTx({ kind: 'expense', cat: UNCATEGORIZED });
-  if (e.target.closest('[data-ignored]')) return openTx({ kind: 'ignore' });
+  const ex = e.target.closest('[data-excl]');
+  if (ex) return openTx({ kind: ex.dataset.excl });
+  const kpi = e.target.closest('[data-kpi]');
+  if (kpi) return openTx({ kind: kpi.dataset.kpi });
   if (e.target.closest('[data-savingstx]')) return openTx({ kind: 'savings' });
   const pr = e.target.closest('tr[data-party]');
   if (pr) return openTx({ kind: partyAll ? '' : 'counted', party: { key: pr.dataset.party, name: pr.dataset.name } });
@@ -342,6 +366,10 @@ $('#ovBody').addEventListener('click', async (e) => {
     await store.setSavings(null, '');
     renderOverview();
   }
+});
+
+$('#ovBody').addEventListener('keydown', (e) => {
+  if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('[data-kpi]')) { e.preventDefault(); e.target.click(); }
 });
 
 $('#ovBody').addEventListener('change', (e) => {
@@ -418,7 +446,7 @@ document.addEventListener('pointermove', (e) => {
 });
 
 // =============== Giao dịch ===============
-for (const id of ['#q', '#fMonth', '#fKind', '#fCat', '#fAcc']) {
+for (const id of ['#q', '#fMonth', '#fKind', '#fCat', '#fAcc', '#fDir', '#fSort']) {
   $(id).addEventListener(id === '#q' ? 'input' : 'change', () => {
     if (id === '#fKind') fillCatFilter();
     shown = PAGE;
@@ -439,7 +467,7 @@ function fillTxFilters() {
   fillMonthSelect($('#fMonth'), monthsAvailable(txs), 'Mọi tháng');
   const kSel = $('#fKind');
   if (!kSel.options.length) {
-    kSel.innerHTML = `<option value="">Mọi loại</option><option value="counted">Có tính (thu + chi)</option>` +
+    kSel.innerHTML = `<option value="">Mọi loại</option><option value="counted">Có tính (thu + chi)</option><option value="excluded">Không tính (mọi loại)</option>` +
       Object.entries(KINDS).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join('');
   }
   fillCatFilter();
@@ -454,13 +482,19 @@ function renderTx() {
   fillTxFilters();
   const q = norm($('#q').value);
   const m = $('#fMonth').value, k = $('#fKind').value, c = $('#fCat').value, a = $('#fAcc').value;
+  const dir = $('#fDir').value, sort = $('#fSort').value;
   const list = txs.filter((t) =>
     (!m || t.date.startsWith(m)) &&
-    (!k || (k === 'counted' ? isCounted(t.kind) : t.kind === k)) &&
+    (!k || (k === 'counted' ? isCounted(t.kind) : k === 'excluded' ? !isCounted(t.kind) : t.kind === k)) &&
+    (!dir || (dir === 'in' ? t.amount > 0 : t.amount < 0)) &&
     (!c || t.category === c) &&
     (!a || t.account === a) &&
     (!partyFilter || t.key === partyFilter.key) &&
-    (!q || norm(`${t.merchant} ${t.description} ${t.counterparty} ${t.note || ''}`).includes(q)));
+    (!q || norm(`${t.party} ${t.merchant} ${t.description} ${t.counterparty} ${t.note || ''}`).includes(q)));
+  // txs đã xếp mới nhất trước.
+  if (sort === 'old') list.reverse();
+  else if (sort === 'big') list.sort((x, y) => Math.abs(y.amount) - Math.abs(x.amount));
+  else if (sort === 'small') list.sort((x, y) => Math.abs(x.amount) - Math.abs(y.amount));
 
   let out = 0, outN = 0, inc = 0, incN = 0;
   for (const t of list) { if (t.amount < 0) { out -= t.amount; outN++; } else { inc += t.amount; incN++; } }

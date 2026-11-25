@@ -220,6 +220,12 @@ dialog.wide { width: min(94vw, 460px); }
 dialog .check input { width: 18px; height: 18px; min-height: 0; margin: 2px 0 0; flex: none; }
 .dlg-actions .grow { flex: 1; }
 .field input { margin: 0; }
+.kpi.clickable { cursor: pointer; }
+.kpi.clickable:hover, .kpi.clickable:focus-visible { border-color: var(--brand); }
+.excluded-note { color: var(--muted); }
+.excluded-note summary { cursor: pointer; }
+.excluded-note ul { margin: 8px 0 4px; padding-left: 20px; display: grid; gap: 4px; color: var(--text); }
+.excluded-note p { margin: 4px 0 0; }
 .check.inline { margin: 0; align-items: center; color: var(--muted); }
 .check.inline input { width: 16px; height: 16px; margin: 0; }
 .row-between.wrap { flex-wrap: wrap; }
