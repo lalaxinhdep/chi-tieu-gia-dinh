@@ -123,6 +123,11 @@ main { max-width: 980px; margin: 0 auto; padding: 16px; display: grid; gap: 14px
   .tx td { border: 0; padding: 0; }
   .tx td.date { grid-column: 1 / -1; }
   .tx td.acc { display: none; }
+  /* Bảng đối tác / tài khoản giữ dạng bảng 3 cột. */
+  .tx.party thead { display: table-header-group; }
+  .tx.party tr { display: table-row; padding: 0; }
+  .tx.party td { border-bottom: 1px solid var(--line); padding: 6px 4px; font-size: 13px; }
+  .tx.party td.amt { font-size: 13px; }
 }
 
 /* ---------- Phần 2+: khóa, điều hướng, báo cáo, cài đặt ---------- */
@@ -214,6 +219,26 @@ dialog.wide { width: min(94vw, 460px); }
 .check { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; margin: 12px 0 4px; }
 dialog .check input { width: 18px; height: 18px; min-height: 0; margin: 2px 0 0; flex: none; }
 .dlg-actions .grow { flex: 1; }
+.field input { margin: 0; }
+.check.inline { margin: 0; align-items: center; color: var(--muted); }
+.check.inline input { width: 16px; height: 16px; margin: 0; }
+.row-between.wrap { flex-wrap: wrap; }
+.link { background: none; border: 0; padding: 0; font: inherit; color: var(--brand); text-decoration: underline; cursor: pointer; }
+.tx.party td { padding: 6px 8px; }
+.tx.party .amt .detail { font-weight: 400; }
+.chip.filter { font-size: 13px; color: var(--text); padding: 2px 4px 2px 10px; margin-right: 6px; }
+.chip button { background: none; border: 0; color: inherit; cursor: pointer; font: inherit; padding: 0 4px; }
+.chip.mine { color: var(--text); border-color: var(--brand); }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 12px; }
+.chips .chip { font-size: 13px; margin: 0; }
+.cat-group h3 { font-weight: 500; }
+.cat-form { display: flex; gap: 8px; flex-wrap: wrap; }
+.cat-form input { flex: 1 1 160px; min-height: 36px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--text); font: inherit; padding: 0 8px; }
+.savings-form { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; margin-top: 8px; }
+.savings-form .field { margin: 4px 0; }
+.savings-form input { min-height: 38px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--text); font: inherit; padding: 0 8px; width: 100%; }
+.savings-form .actions { grid-column: 1 / -1; }
+@media (max-width: 480px) { .savings-form { grid-template-columns: 1fr; } }
 
 dialog { border: 1px solid var(--line); border-radius: var(--radius); background: var(--card); color: var(--text); padding: 20px; width: min(92vw, 380px); }
 dialog::backdrop { background: rgba(0,0,0,.45); }

@@ -105,6 +105,16 @@
           <div id="accounts"></div>
         </div>
         <div class="card">
+          <h2>Danh mục</h2>
+          <p class="muted small">Danh mục có sẵn và danh mục bạn tự thêm (có dấu ✕). Cũng có thể thêm ngay khi sửa một giao dịch.</p>
+          <div id="cats"></div>
+          <form id="catForm" class="cat-form" autocomplete="off">
+            <input id="catName" type="text" maxlength="40" placeholder="Tên danh mục mới" aria-label="Tên danh mục mới">
+            <select id="catKind" aria-label="Loại danh mục"><option value="expense">Chi tiêu</option><option value="income">Thu nhập</option></select>
+            <button class="btn small primary" type="submit">Thêm</button>
+          </form>
+        </div>
+        <div class="card">
           <h2>Quy tắc đã học</h2>
           <p class="muted small">Mỗi khi bạn sửa danh mục và chọn "nhớ cho lần sau", app lưu một quy tắc ở đây.</p>
           <div id="rules"></div>
@@ -172,6 +182,13 @@
       <label class="field" id="txdCatWrap">Danh mục
         <select id="txdCat"></select>
       </label>
+      <label class="field" id="txdNewCatWrap" hidden>Tên danh mục mới
+        <input id="txdNewCat" type="text" maxlength="40" autocomplete="off" placeholder="Ví dụ: Thú cưng">
+      </label>
+      <label class="field">Ghi chú (không bắt buộc)
+        <input id="txdNote" type="text" maxlength="120" autocomplete="off" placeholder="Ví dụ: chuyển nhầm, đã trả lại">
+      </label>
+      <label class="check" id="txdPairWrap" hidden><input id="txdPair" type="checkbox" checked> <span id="txdPairText"></span></label>
       <label class="check"><input id="txdRemember" type="checkbox" checked> <span id="txdRememberText"></span></label>
       <p id="txdSource" class="small muted"></p>
       <div class="dlg-actions">

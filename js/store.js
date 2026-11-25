@@ -19,6 +19,8 @@ const emptyData = () => ({
   rules: [],         // quy tắc học từ lần sửa tay: { key, kind, category, createdAt }
   overrides: {},     // id giao dịch -> { kind, category } sửa tay riêng từng dòng
   family: [],        // tên chủ tài khoản trong gia đình (chuyển giữa họ = nội bộ)
+  categories: { expense: [], income: [] }, // danh mục tự thêm
+  savings: { opening: null, asOf: '' },     // số dư tiết kiệm đầu kỳ (tính từ đầu ngày asOf)
 });
 
 function migrate(d) {
@@ -141,6 +143,26 @@ export async function removeRule(ruleKey) {
   await save();
 }
 
+// ---------- Danh mục tự thêm ----------
+export async function addCategory(kind, name) {
+  const list = data.categories[kind];
+  if (!list.some((c) => norm(c) === norm(name))) list.push(name);
+  await save();
+}
+
+/** Xóa danh mục: quy tắc và sửa tay đang dùng nó bị bỏ, giao dịch quay về phân loại tự động. */
+export async function removeCategory(kind, name) {
+  data.categories[kind] = data.categories[kind].filter((c) => c !== name);
+  data.rules = data.rules.filter((r) => r.category !== name);
+  for (const [id, o] of Object.entries(data.overrides)) if (o.category === name) delete data.overrides[id];
+  await save();
+}
+
+export async function setSavings(opening, asOf) {
+  data.savings = { opening, asOf };
+  await save();
+}
+
 // ---------- Backup ----------
 export async function exportBackup() {
   const { iv, ct } = await encryptJSON(key, data);
@@ -173,6 +195,10 @@ export async function mergeData(other) {
   for (const r of other.rules) if (!ruleKeys.has(r.key)) data.rules.push(r);
   for (const [id, o] of Object.entries(other.overrides)) data.overrides[id] ??= o;
   for (const f of other.family) addFamily(f);
+  for (const k of ['expense', 'income']) {
+    for (const c of other.categories[k]) if (!data.categories[k].includes(c)) data.categories[k].push(c);
+  }
+  if (data.savings.opening == null && other.savings.opening != null) data.savings = other.savings;
   await save();
   return { added };
 }

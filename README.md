@@ -13,6 +13,11 @@ Web app (PWA) quản lý chi tiêu từ file sao kê ngân hàng/ví. File đư�
   - Không tính: trả nợ thẻ tín dụng (cả hai phía), chuyển giữa tài khoản của thành viên gia đình, gửi/rút tiết kiệm, món mua đã chuyển sang trả góp (tính theo từng kỳ trả góp).
   - Hoàn tiền / trả hàng làm giảm chi của danh mục.
 - [x] **Báo cáo**: tiền vào, tiền ra, chênh lệch; chi theo danh mục; thu theo nguồn; biểu đồ và bảng theo tháng.
+  - Theo đối tác: chuyển cho ai, nhận từ ai, mua ở đâu, bao nhiêu lần, bao nhiêu tiền. Tên người gửi được tách từ nội dung chuyển khoản.
+  - Theo tài khoản của tôi: chi và thu trên từng tài khoản, thẻ.
+  - Tiết kiệm: nhập số dư đầu kỳ, app cộng tiền gửi, trừ tiền rút để ra số dư từng tháng.
+- [x] **Danh mục tự thêm** (Cài đặt, hoặc ngay khi sửa giao dịch).
+- [x] **Loại khỏi báo cáo** từng giao dịch, kèm ghi chú (ví dụ chuyển nhầm). App gợi ý loại luôn khoản ngược chiều cùng số tiền.
 - [x] **Backup**: xuất file `.ctgd` đã mã hóa, nhập để gộp dữ liệu hoặc khôi phục trên máy mới.
 - [x] **Đã đưa lên GitHub Pages:** https://lalaxinhdep.github.io/chi-tieu-gia-dinh/
 

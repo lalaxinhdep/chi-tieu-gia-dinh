@@ -12,11 +12,21 @@ export const KINDS = {
   expense: 'Chi tiêu',
   income: 'Thu nhập',
   transfer: 'Chuyển nội bộ (không tính)',
+  savings: 'Gửi / rút tiết kiệm (không tính)',
   cc_payment: 'Trả nợ thẻ (không tính)',
-  ignore: 'Bỏ qua (không tính)',
+  ignore: 'Loại khỏi báo cáo (chuyển nhầm, trả lại…)',
 };
 export const isCounted = (kind) => kind === 'expense' || kind === 'income';
 export const UNCATEGORIZED = 'Chưa phân loại';
+
+/** Danh mục có sẵn + danh mục người dùng tự thêm. "Chưa phân loại" luôn ở cuối. */
+export function categoryLists(data) {
+  const custom = data?.categories || { expense: [], income: [] };
+  return {
+    expense: [...EXPENSE_CATS.filter((c) => c !== UNCATEGORIZED), ...custom.expense, UNCATEGORIZED],
+    income: [...INCOME_CATS, ...custom.income],
+  };
+}
 
 // Từ khóa → danh mục chi (so trên chữ đã bỏ dấu, viết thường). Dòng trên được ưu tiên hơn dòng dưới.
 const KEYWORDS = [
@@ -36,13 +46,32 @@ const KEYWORDS = [
 ];
 const COMPANY = /cong ty|\bcty\b|\bct\b|tnhh|ho kinh doanh|\bhkd\b|corp|jsc|ltd|group|cua hang|\bshop\b|store|truong|benh vien|trung gian|ngan hang|techcombank|payoo/;
 
-/** Khóa để nhớ quy tắc: tên nơi giao dịch, bỏ dấu, bỏ số (mã đơn, mã cửa hàng thay đổi theo lần). */
-export function merchantKey(t) {
-  return norm(t.merchant || t.counterparty || t.description)
-    .replace(/\d+/g, ' ').replace(/[^a-z&.\- ]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 60);
+const toKey = (s) => norm(s).replace(/\d+/g, ' ').replace(/[^a-z&.\- ]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 60);
+
+/**
+ * Tên đối tác. Tiền vào thường không có cột người gửi, nên lấy tên từ nội dung:
+ * "CT tu 0371 0037 TRAN VAN A toi …", "IBFT NGUYEN VAN B chuyen tien", "Huan Duc chuyen khoan…".
+ */
+export function partyName(t) {
+  if (t.counterparty) return t.merchant || t.counterparty;
+  if (t.merchant && t.merchant !== t.description) return t.merchant;
+  const d = norm(t.description);
+  const m = d.match(/\btu\s+[\d\s]{6,}?\s*([a-z]+(?:\s+[a-z]+){1,5}?)\s+toi\b/)
+    || d.match(/((?:[a-z]+\s+){1,4})chuyen\b/);
+  if (m) {
+    const name = m[1].replace(/^(?:ibft|mbvcb|ck|ft|tu)\s+/, '').trim();
+    if (name.split(' ').length >= 2) return name.toUpperCase();
+  }
+  return t.merchant || t.description;
 }
 
-const kindForCategory = (cat) => (INCOME_CATS.includes(cat) ? 'income' : 'expense');
+/** Khóa để nhớ quy tắc: tên đối tác, bỏ dấu, bỏ số (mã đơn, mã cửa hàng thay đổi theo lần). */
+export function merchantKey(t) {
+  return toKey(partyName(t));
+}
+// Khóa kiểu cũ (trước khi tách tên người gửi), để quy tắc đã học vẫn dùng được.
+const legacyKey = (t) => toKey(t.merchant || t.counterparty || t.description);
+
 
 export function keywordCategory(t) {
   const text = `${norm(t.merchant)} ${norm(t.counterparty)} ${norm(t.description)}`;
@@ -73,7 +102,7 @@ function structural(t, ctx) {
   }
   // Gửi/rút tiết kiệm của chính mình: chuyển nội bộ.
   if (/mo moi tien gui|tat toan tiet kiem|rut goc|rut tien thong minh|gui tiet kiem|tien gui online/.test(d)) {
-    return { kind: 'transfer', category: '', note: 'Tiết kiệm' };
+    return { kind: 'savings', category: '' };
   }
   // Chuyển tiền giữa tài khoản của các thành viên trong gia đình.
   for (const f of ctx.family) {
@@ -120,16 +149,17 @@ export function buildContext(data) {
       .sort((a, b) => (a.date < b.date ? 1 : -1))[0];
     if (buy) installmentPairs.add(buy.id);
   }
-  return { family, rules, overrides: data.overrides, installmentPairs };
+  const incomeCats = new Set(categoryLists(data).income);
+  return { family, rules, overrides: data.overrides, installmentPairs, incomeCats };
 }
 
 export function classify(t, ctx) {
   const key = merchantKey(t);
   const o = ctx.overrides[t.id];
   if (o) return { ...o, key, source: 'manual' };
-  const r = ctx.rules.get(key);
+  const r = ctx.rules.get(key) || ctx.rules.get(legacyKey(t));
   if (r) {
-    const kind = isCounted(r.kind) ? kindForCategory(r.category) : r.kind;
+    const kind = isCounted(r.kind) ? (ctx.incomeCats.has(r.category) ? 'income' : 'expense') : r.kind;
     return { kind, category: isCounted(kind) ? r.category : '', key, source: 'rule' };
   }
   const s = structural(t, ctx);
@@ -141,6 +171,6 @@ export function classify(t, ctx) {
 export function classifyAll(data) {
   const ctx = buildContext(data);
   return Object.values(data.transactions)
-    .map((t) => ({ ...t, ...classify(t, ctx) }))
+    .map((t) => ({ ...t, party: partyName(t), ...classify(t, ctx) }))
     .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
 }

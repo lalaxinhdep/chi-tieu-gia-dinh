@@ -1,9 +1,9 @@
 // Giao diện chính: khóa/mở khóa, tổng quan, giao dịch, nhập file, cài đặt.
 import { parseFile } from './parsers/index.js';
 import * as store from './store.js';
-import { classifyAll, EXPENSE_CATS, INCOME_CATS, KINDS, isCounted, UNCATEGORIZED } from './classify.js';
-import { summarize, byMonth, monthsAvailable } from './reports.js';
-import { esc, fmtMoney, fmtSigned, fmtDate, maskAccount, norm } from './util.js';
+import { classifyAll, categoryLists, EXPENSE_CATS, INCOME_CATS, KINDS, isCounted, UNCATEGORIZED } from './classify.js';
+import { summarize, byMonth, monthsAvailable, byParty, byAccount, savingsReport } from './reports.js';
+import { esc, fmtMoney, fmtSigned, fmtDate, maskAccount, norm, parseMoney } from './util.js';
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
@@ -15,6 +15,11 @@ let view = 'overview';
 let txs = [];               // giao dịch đã phân loại
 let session = { results: [], pending: [] }; // kết quả đọc file trong lần mở này
 let shown = PAGE;
+let partyFilter = null;      // { key, name } khi xem giao dịch của một đối tác
+let partyAll = false;        // bảng đối tác: gồm cả khoản không tính
+let partyExpanded = false;
+const PARTY_TOP = 10;
+const cats = () => categoryLists(store.data);
 
 // =============== Hộp thoại dùng chung ===============
 function askSecret(title, msg, okLabel = 'Mở') {
@@ -125,7 +130,8 @@ function doLock() {
   store.lock();
   txs = [];
   session = { results: [], pending: [] };
-  for (const id of ['#ovBody', '#txList', '#files', '#history', '#accounts', '#rules']) $(id).innerHTML = '';
+  partyFilter = null; partyAll = false; partyExpanded = false;
+  for (const id of ['#ovBody', '#txList', '#files', '#history', '#accounts', '#rules', '#cats']) $(id).innerHTML = '';
   delete $('#ovMonth').dataset.init;
   $('#family').value = '';
   showLock();
@@ -180,7 +186,7 @@ function fillMonthSelect(sel, months, allLabel, keep = true) {
 }
 
 // =============== Tổng quan ===============
-$('#ovMonth').addEventListener('change', renderOverview);
+$('#ovMonth').addEventListener('change', () => { partyExpanded = false; renderOverview(); });
 
 function renderOverview() {
   const months = monthsAvailable(txs);
@@ -218,7 +224,7 @@ function renderOverview() {
       <div class="card kpi net"><dt>Chênh lệch</dt><dd>${fmtSigned(s.net)}</dd></div>
     </dl>
     ${s.uncategorized ? `<p class="notice">Có ${s.uncategorized} giao dịch chưa phân loại. <button type="button" data-uncat>Phân loại ngay</button>. App sẽ nhớ cho những lần sau.</p>` : ''}
-    <p class="muted small">Không tính ${s.excludedCount} giao dịch (${fmtMoney(s.excluded)} đ) là trả nợ thẻ, chuyển nội bộ, tiết kiệm hoặc đã bỏ qua.</p>
+    <p class="muted small">Không tính ${s.excludedCount} giao dịch (${fmtMoney(s.excluded)} đ) là trả nợ thẻ, chuyển nội bộ, tiết kiệm hoặc đã loại khỏi báo cáo${s.ignoredCount ? ` (<button type="button" class="link" data-ignored>${s.ignoredCount} khoản bạn tự loại</button>)` : ''}.</p>
     <div class="card">
       <h2>Chi theo danh mục</h2>
       <div class="bars">${catRows || '<p class="empty">Không có khoản chi.</p>'}</div>
@@ -227,6 +233,9 @@ function renderOverview() {
       <h2>Thu theo nguồn</h2>
       <div class="bars">${incRows || '<p class="empty">Không có khoản thu.</p>'}</div>
     </div>
+    ${partyCard(month)}
+    ${accountCard(month)}
+    ${savingsCard(month)}
     <div class="card chart">
       <h2>Thu và chi theo tháng</h2>
       <div class="legend"><span><i style="background:var(--s-in)"></i>Tiền vào</span><span><i style="background:var(--s-out)"></i>Tiền ra</span></div>
@@ -238,26 +247,118 @@ function renderOverview() {
     </div>`;
 }
 
-$('#ovBody').addEventListener('click', (e) => {
+const lots = (n) => `${n} lần`;
+// "NGAN HANG TMCP NGOAI THUONG VIET NAM (VIETCOMBANK)" → "VIETCOMBANK"
+const shortBank = (b) => b.split(', ').map((x) => x.match(/\(([^)]+)\)/)?.[1] || x.replace(/^NGAN HANG (TMCP )?/i, '')).join(', ');
+
+function partyCard(month) {
+  const rows = byParty(txs, month, partyAll);
+  const list = partyExpanded ? rows : rows.slice(0, PARTY_TOP);
+  const cell = (v, n, cls) => (n ? `<td class="amt ${cls}">${fmtMoney(v)}<div class="detail">${lots(n)}</div></td>` : '<td class="amt detail">—</td>');
+  const body = list.map((r) => `<tr class="clickable" data-party="${esc(r.key)}" data-name="${esc(r.name)}">
+      <td><div class="main">${esc(r.name)}</div>${r.bank ? `<div class="detail">${esc(shortBank(r.bank))}</div>` : ''}</td>
+      ${cell(r.out, r.outCount, 'out')}${cell(r.in, r.inCount, 'in')}
+    </tr>`).join('');
+  return `<div class="card">
+      <div class="row-between wrap"><h2>Theo đối tác</h2>
+        <label class="check inline"><input type="checkbox" data-partyall ${partyAll ? 'checked' : ''}> Gồm cả khoản không tính</label></div>
+      <p class="muted small">Chuyển cho ai, nhận từ ai, mua ở đâu: bao nhiêu lần, bao nhiêu tiền. Bấm một dòng để xem từng giao dịch.</p>
+      ${rows.length ? `<table class="tx party"><thead><tr><th>Đối tác</th><th class="amt">Tiền ra</th><th class="amt">Tiền vào</th></tr></thead><tbody>${body}</tbody></table>
+      ${rows.length > PARTY_TOP ? `<div class="more"><button class="btn small" type="button" data-partymore>${partyExpanded ? 'Thu gọn' : `Xem tất cả ${rows.length} đối tác`}</button></div>` : ''}`
+        : '<p class="empty">Không có giao dịch.</p>'}
+    </div>`;
+}
+
+function accountCard(month) {
+  const rows = byAccount(txs, month);
+  if (!rows.length) return '';
+  const body = rows.map((r) => `<tr class="clickable" data-acc="${esc(r.account)}">
+      <td><div class="main">${esc(accLabel(r.account))}</div></td>
+      <td class="amt out">${fmtMoney(r.out)}<div class="detail">${lots(r.outCount)}</div></td>
+      <td class="amt in">${r.inCount ? fmtMoney(r.in) + `<div class="detail">${lots(r.inCount)}</div>` : '—'}</td>
+    </tr>`).join('');
+  return `<div class="card">
+      <h2>Theo tài khoản của tôi</h2>
+      <p class="muted small">Chi tiêu và thu nhập (chỉ khoản có tính) trên từng tài khoản, thẻ. Bấm một dòng để xem giao dịch.</p>
+      <table class="tx party"><thead><tr><th>Tài khoản</th><th class="amt">Chi</th><th class="amt">Thu</th></tr></thead><tbody>${body}</tbody></table>
+    </div>`;
+}
+
+function savingsCard(month) {
+  const sv = store.data.savings;
+  const r = savingsReport(txs, sv, month);
+  const form = `<form class="savings-form" data-savings>
+      <label class="field">Số dư tiết kiệm (đ)<input name="opening" inputmode="numeric" autocomplete="off" placeholder="Ví dụ 150.000.000" value="${sv.opening != null ? fmtMoney(sv.opening) : ''}"></label>
+      <label class="field">Tính từ đầu ngày<input name="asOf" type="date" value="${esc(sv.asOf || '')}"></label>
+      <div class="actions">${sv.opening != null ? '<button class="btn small" type="button" data-savingsclear>Xóa</button>' : ''}<button class="btn small primary" type="submit">Lưu</button></div>
+    </form>`;
+  if (!r) {
+    return `<div class="card">
+        <h2>Tiết kiệm</h2>
+        <p class="muted small">Nhập tổng số dư các sổ tiết kiệm tại một ngày. App cộng các khoản gửi thêm, trừ các khoản rút có trong sao kê để tính số dư theo tháng.</p>
+        ${form}
+      </div>`;
+  }
+  const before = month && r.to < sv.asOf;
+  return `<div class="card">
+      <h2>Tiết kiệm</h2>
+      <dl class="stats">
+        <div><dt>${month ? 'Đầu tháng' : `Đầu kỳ (${esc(fmtDate(sv.asOf))})`}</dt><dd>${fmtMoney(r.start)}</dd></div>
+        <div><dt>Gửi thêm</dt><dd class="in">+${fmtMoney(r.deposit)}</dd></div>
+        <div><dt>Rút ra</dt><dd class="out">−${fmtMoney(r.withdraw)}</dd></div>
+        <div><dt>${month ? 'Cuối tháng' : 'Hiện tại'}</dt><dd>${fmtMoney(r.end)}</dd></div>
+      </dl>
+      <p class="muted small">Tính từ số dư ${fmtMoney(sv.opening)} đ đầu ngày ${esc(fmtDate(sv.asOf))}, cộng tiền gửi và trừ tiền rút có trong sao kê (${r.count} giao dịch${r.count ? `, <button type="button" class="link" data-savingstx>xem</button>` : ''}).${before ? ' Tháng này trước ngày bạn nhập số dư nên app tính ngược lại.' : ''} Lãi trả vào tài khoản thanh toán được tính là thu nhập, không cộng vào đây.</p>
+      <details><summary class="small">Sửa số dư đầu kỳ</summary>${form}</details>
+    </div>`;
+}
+
+function openTx({ kind = '', cat = '', acc = '', party = null } = {}) {
+  partyFilter = party;
+  go('tx');
+  fillTxFilters();
+  $('#q').value = '';
+  $('#fMonth').value = $('#ovMonth').value;
+  $('#fKind').value = kind;
+  fillCatFilter();
+  $('#fCat').value = cat;
+  $('#fAcc').value = acc;
+  shown = PAGE;
+  renderTx();
+}
+
+$('#ovBody').addEventListener('click', async (e) => {
   const row = e.target.closest('.bar-row');
-  if (row) {
-    go('tx');
-    fillTxFilters();
-    $('#fMonth').value = $('#ovMonth').value;
-    $('#fKind').value = row.dataset.kind || 'expense';
-    $('#fCat').value = row.dataset.cat;
-    shown = PAGE;
-    renderTx();
-    return;
+  if (row) return openTx({ kind: row.dataset.kind || 'expense', cat: row.dataset.cat });
+  if (e.target.closest('[data-uncat]')) return openTx({ kind: 'expense', cat: UNCATEGORIZED });
+  if (e.target.closest('[data-ignored]')) return openTx({ kind: 'ignore' });
+  if (e.target.closest('[data-savingstx]')) return openTx({ kind: 'savings' });
+  const pr = e.target.closest('tr[data-party]');
+  if (pr) return openTx({ kind: partyAll ? '' : 'counted', party: { key: pr.dataset.party, name: pr.dataset.name } });
+  const ar = e.target.closest('tr[data-acc]');
+  if (ar) return openTx({ kind: 'counted', acc: ar.dataset.acc });
+  if (e.target.closest('[data-partymore]')) { partyExpanded = !partyExpanded; renderOverview(); return; }
+  if (e.target.closest('[data-savingsclear]')) {
+    await store.setSavings(null, '');
+    renderOverview();
   }
-  if (e.target.closest('[data-uncat]')) {
-    go('tx');
-    fillTxFilters();
-    $('#fMonth').value = $('#ovMonth').value;
-    $('#fKind').value = 'expense';
-    $('#fCat').value = UNCATEGORIZED;
-    renderTx();
-  }
+});
+
+$('#ovBody').addEventListener('change', (e) => {
+  if (e.target.matches('[data-partyall]')) { partyAll = e.target.checked; partyExpanded = false; renderOverview(); }
+});
+
+$('#ovBody').addEventListener('submit', async (e) => {
+  const f = e.target.closest('[data-savings]');
+  if (!f) return;
+  e.preventDefault();
+  const opening = parseMoney(f.opening.value);
+  const asOf = f.asOf.value;
+  if (opening == null || opening < 0) { toast('Hãy nhập số dư tiết kiệm (số tiền).'); return; }
+  if (!asOf) { toast('Hãy chọn ngày của số dư này.'); return; }
+  await store.setSavings(opening, asOf);
+  renderOverview();
+  toast('Đã lưu số dư tiết kiệm.');
 });
 
 function niceMax(v) {
@@ -327,10 +428,11 @@ for (const id of ['#q', '#fMonth', '#fKind', '#fCat', '#fAcc']) {
 
 function fillCatFilter() {
   const k = $('#fKind').value;
-  const cats = k === 'income' ? INCOME_CATS : k === 'expense' ? EXPENSE_CATS : [...EXPENSE_CATS, ...INCOME_CATS];
+  const c = cats();
+  const list = k === 'income' ? c.income : k === 'expense' ? c.expense : [...c.expense, ...c.income];
   const cur = $('#fCat').value;
-  $('#fCat').innerHTML = `<option value="">Mọi danh mục</option>` + cats.map((c) => `<option>${esc(c)}</option>`).join('');
-  if (cats.includes(cur)) $('#fCat').value = cur;
+  $('#fCat').innerHTML = `<option value="">Mọi danh mục</option>` + list.map((x) => `<option>${esc(x)}</option>`).join('');
+  if (list.includes(cur)) $('#fCat').value = cur;
 }
 
 function fillTxFilters() {
@@ -340,7 +442,7 @@ function fillTxFilters() {
     kSel.innerHTML = `<option value="">Mọi loại</option><option value="counted">Có tính (thu + chi)</option>` +
       Object.entries(KINDS).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join('');
   }
-  if (!$('#fCat').options.length) fillCatFilter();
+  fillCatFilter();
   const aSel = $('#fAcc');
   const cur = aSel.value;
   aSel.innerHTML = `<option value="">Mọi tài khoản</option>` +
@@ -357,12 +459,15 @@ function renderTx() {
     (!k || (k === 'counted' ? isCounted(t.kind) : t.kind === k)) &&
     (!c || t.category === c) &&
     (!a || t.account === a) &&
-    (!q || norm(`${t.merchant} ${t.description} ${t.counterparty}`).includes(q)));
+    (!partyFilter || t.key === partyFilter.key) &&
+    (!q || norm(`${t.merchant} ${t.description} ${t.counterparty} ${t.note || ''}`).includes(q)));
 
-  const sum = list.reduce((s, t) => s + (isCounted(t.kind) ? t.amount : 0), 0);
-  $('#txSummary').textContent = `${list.length} giao dịch · tổng có tính: ${fmtSigned(sum)} đ`;
+  let out = 0, outN = 0, inc = 0, incN = 0;
+  for (const t of list) { if (t.amount < 0) { out -= t.amount; outN++; } else { inc += t.amount; incN++; } }
+  const party = partyFilter ? `<span class="chip filter">Đối tác: ${esc(partyFilter.name)} <button type="button" data-clearparty aria-label="Bỏ lọc đối tác">✕</button></span> ` : '';
+  $('#txSummary').innerHTML = `${party}${list.length} giao dịch · Tiền ra <b class="out">${fmtMoney(out)} đ</b> (${lots(outN)}) · Tiền vào <b class="in">${fmtMoney(inc)} đ</b> (${lots(incN)})`;
   const body = list.slice(0, shown).map((t) => {
-    const main = t.merchant || t.counterparty || t.description;
+    const main = t.party || t.merchant || t.counterparty || t.description;
     const detail = t.description && t.description !== main ? t.description : '';
     const counted = isCounted(t.kind);
     const chip = counted
@@ -370,7 +475,7 @@ function renderTx() {
       : `<span class="chip">${esc(KINDS[t.kind])}</span>`;
     return `<tr class="clickable ${counted ? '' : 'excluded'}" data-id="${esc(t.id)}">
       <td class="date">${esc(fmtDate(t.date))}</td>
-      <td><div class="main">${esc(main)}</div>${chip}${detail ? `<div class="detail">${esc(detail)}</div>` : ''}</td>
+      <td><div class="main">${esc(main)}</div>${chip}${t.source === 'manual' && t.note ? `<div class="detail">📝 ${esc(t.note)}</div>` : ''}${detail ? `<div class="detail">${esc(detail)}</div>` : ''}</td>
       <td class="acc detail">${esc(accLabel(t.account))}</td>
       <td class="amt ${t.amount > 0 ? 'in' : 'out'}">${fmtSigned(t.amount)}</td>
     </tr>`;
@@ -380,6 +485,13 @@ function renderTx() {
     ? `<table class="tx"><thead><tr><th>Ngày</th><th>Nội dung</th><th>Tài khoản</th><th class="amt">Số tiền</th></tr></thead><tbody>${body}</tbody></table>${more}`
     : '<p class="empty">Không có giao dịch phù hợp.</p>';
 }
+
+$('#txSummary').addEventListener('click', (e) => {
+  if (!e.target.closest('[data-clearparty]')) return;
+  partyFilter = null;
+  shown = PAGE;
+  renderTx();
+});
 
 $('#txList').addEventListener('click', (e) => {
   if (e.target.closest('[data-more]')) { shown += PAGE; renderTx(); return; }
@@ -396,17 +508,39 @@ function editTx(id) {
   $('#txdInfo').textContent = `${fmtDate(t.date)} · ${accLabel(t.account)}\n${t.description}`;
   $('#txdKind').innerHTML = Object.entries(KINDS).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join('');
   $('#txdKind').value = t.kind;
+  $('#txdNote').value = t.source === 'manual' ? t.note || '' : '';
+  $('#txdNewCat').value = '';
+
+  // Khoản ngược chiều cùng số tiền trong 30 ngày (vd. nhận nhầm rồi chuyển trả lại).
+  const pair = txs
+    .filter((x) => x.id !== t.id && x.kind !== 'ignore' && Math.abs(x.amount + t.amount) < 1
+      && Math.abs(Date.parse(x.date) - Date.parse(t.date)) <= 30 * 864e5)
+    .sort((a, b) => (b.key === t.key) - (a.key === t.key)
+      || Math.abs(Date.parse(a.date) - Date.parse(t.date)) - Math.abs(Date.parse(b.date) - Date.parse(t.date)))[0];
+  $('#txdPairText').textContent = pair
+    ? `Loại luôn khoản ngược chiều: ${fmtDate(pair.date)} · ${fmtSigned(pair.amount)} đ · ${pair.merchant || pair.counterparty || pair.description}`
+    : '';
+
+  const similar = txs.filter((x) => x.key === t.key).length;
   const fillCats = (kind) => {
-    const cats = kind === 'income' ? INCOME_CATS : EXPENSE_CATS;
-    $('#txdCat').innerHTML = cats.map((c) => `<option>${esc(c)}</option>`).join('');
+    const list = kind === 'income' ? cats().income : cats().expense;
+    const cur = $('#txdCat').value;
+    $('#txdCat').innerHTML = list.map((c) => `<option>${esc(c)}</option>`).join('') + '<option value="__new">➕ Thêm danh mục mới…</option>';
+    if (list.includes(cur)) $('#txdCat').value = cur;
     $('#txdCatWrap').hidden = !isCounted(kind);
+    $('#txdNewCatWrap').hidden = !isCounted(kind) || $('#txdCat').value !== '__new';
+    // Loại khỏi báo cáo thường chỉ cho đúng giao dịch này, không áp cho mọi giao dịch cùng người.
+    $('#txdRemember').checked = kind !== 'ignore';
+    $('#txdPairWrap').hidden = !(kind === 'ignore' && pair);
+    $('#txdPair').checked = true;
   };
   fillCats(t.kind);
   if (t.category) $('#txdCat').value = t.category;
   $('#txdKind').onchange = () => fillCats($('#txdKind').value);
-
-  const similar = txs.filter((x) => x.key === t.key).length;
-  $('#txdRemember').checked = true;
+  $('#txdCat').onchange = () => {
+    $('#txdNewCatWrap').hidden = $('#txdCat').value !== '__new';
+    if ($('#txdCat').value === '__new') $('#txdNewCat').focus();
+  };
   $('#txdRememberText').textContent = `Nhớ cho các giao dịch giống vậy, cả lần nhập sau (nhận theo “${t.key || '—'}”, hiện có ${similar} giao dịch)`;
   $('#txdSource').textContent = {
     manual: 'Đang dùng: bạn đã sửa tay giao dịch này.',
@@ -424,17 +558,37 @@ function editTx(id) {
     }
     if (dlg.returnValue !== 'ok') return;
     const kind = $('#txdKind').value;
-    const category = isCounted(kind) ? $('#txdCat').value : '';
+    let category = isCounted(kind) ? $('#txdCat').value : '';
+    if (category === '__new') {
+      category = $('#txdNewCat').value.trim().replace(/\s+/g, ' ');
+      if (!category) { toast('Chưa nhập tên danh mục mới nên chưa lưu.'); return; }
+      const existing = [...cats().expense, ...cats().income].find((c) => norm(c) === norm(category));
+      if (existing) category = existing;
+      else await store.addCategory(kind === 'income' ? 'income' : 'expense', category);
+    }
+    const note = $('#txdNote').value.trim();
     if ($('#txdRemember').checked && t.key) {
       await store.upsertRule({ key: t.key, kind, category });
-      await store.setOverride(t.id, null); // để dòng này theo quy tắc chung
+      // Dòng này theo quy tắc chung; chỉ giữ sửa tay riêng khi có ghi chú.
+      await store.setOverride(t.id, note ? { kind, category, note } : null);
     } else {
-      await store.setOverride(t.id, { kind, category });
+      await store.setOverride(t.id, { kind, category, ...(note && { note }) });
+    }
+    if (kind === 'ignore' && pair && $('#txdPair').checked) {
+      await store.setOverride(pair.id, { kind: 'ignore', category: '', note: note || 'Cặp với khoản ngày ' + fmtDate(t.date) });
     }
     refresh();
   }, { once: true });
   dlg.showModal();
 }
+
+// Enter trong ô chữ = Lưu (nếu không, form sẽ bấm nút đầu tiên là "Về mặc định").
+$('#txDialog').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && e.target.matches('input[type="text"]')) {
+    e.preventDefault();
+    $('#txDialog').close('ok');
+  }
+});
 
 // =============== Nhập file ===============
 $('#file').addEventListener('change', (e) => { handleFiles([...e.target.files]); e.target.value = ''; });
@@ -525,7 +679,44 @@ function renderSettings() {
       <div><div>“${esc(r.key)}”</div><div class="detail">→ ${esc(isCounted(r.kind) ? r.category : KINDS[r.kind])}</div></div>
       <button class="btn small" data-delrule="${esc(r.key)}">Xóa</button>
     </div>`).join('') : '<p class="empty">Chưa có quy tắc nào. Sửa danh mục một giao dịch trong mục Giao dịch để dạy app.</p>';
+  renderCategories();
 }
+
+function renderCategories() {
+  const d = store.data;
+  const used = (c) => txs.filter((t) => t.category === c).length;
+  const group = (kind, builtIn, title) => `<div class="cat-group"><h3 class="small muted">${title}</h3><div class="chips">
+      ${builtIn.filter((c) => c !== UNCATEGORIZED).map((c) => `<span class="chip">${esc(c)}</span>`).join('')}
+      ${d.categories[kind].map((c) => `<span class="chip mine">${esc(c)} <button type="button" data-delcat="${esc(c)}" data-kind="${kind}" aria-label="Xóa ${esc(c)}">✕</button></span>`).join('')}
+    </div></div>`;
+  $('#cats').innerHTML = group('expense', EXPENSE_CATS, 'Chi tiêu') + group('income', INCOME_CATS, 'Thu nhập');
+  $('#cats').dataset.used = JSON.stringify(Object.fromEntries([...d.categories.expense, ...d.categories.income].map((c) => [c, used(c)])));
+}
+
+$('#catForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const name = $('#catName').value.trim().replace(/\s+/g, ' ');
+  if (!name) return;
+  const all = [...cats().expense, ...cats().income];
+  if (all.some((c) => norm(c) === norm(name))) { toast(`Đã có danh mục “${name}”.`); return; }
+  await store.addCategory($('#catKind').value, name);
+  $('#catName').value = '';
+  renderCategories();
+  toast(`Đã thêm danh mục “${name}”.`);
+});
+
+$('#cats').addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-delcat]');
+  if (!b) return;
+  const name = b.dataset.delcat;
+  const n = JSON.parse($('#cats').dataset.used || '{}')[name] || 0;
+  const msg = n
+    ? `${n} giao dịch đang thuộc “${name}” sẽ quay về phân loại tự động. Quy tắc đã học cho danh mục này cũng bị xóa.`
+    : `Chưa có giao dịch nào thuộc “${name}”.`;
+  if (!(await confirmBox('Xóa danh mục?', msg, 'Xóa'))) return;
+  await store.removeCategory(b.dataset.kind, name);
+  refresh();
+});
 
 $('#saveFamily').addEventListener('click', async () => {
   store.data.family = [];
