@@ -34,7 +34,10 @@ function assignRoles(row) {
 
 export async function parseExcel(buf, fileName) {
   const XLSX = await import(SHEETJS);
-  const wb = XLSX.read(new Uint8Array(buf), { type: 'array', cellDates: true });
+  // CSV: tự giải mã UTF-8 (tiêu đề tiếng Việt) và giữ nguyên chữ để không bị hiểu ngày dd/mm thành mm/dd.
+  const wb = /\.csv$/i.test(fileName)
+    ? XLSX.read(new TextDecoder('utf-8').decode(buf).replace(/^﻿/, ''), { type: 'string', raw: true })
+    : XLSX.read(new Uint8Array(buf), { type: 'array', cellDates: true });
   const warnings = [];
 
   for (const sheetName of wb.SheetNames) {
