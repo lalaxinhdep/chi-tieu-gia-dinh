@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <!-- Chỉ cho phép tải mã thư viện; không có địa chỉ nào để gửi dữ liệu đi. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net https://cdn.sheetjs.com blob:; worker-src 'self' blob: https://cdn.jsdelivr.net; connect-src 'self' https://cdn.jsdelivr.net https://cdn.sheetjs.com; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; object-src 'none'; base-uri 'none'">
+  <meta name="referrer" content="no-referrer">
+  <meta name="theme-color" content="#0f766e">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Chi tiêu">
+  <title>Chi tiêu gia đình</title>
+  <link rel="stylesheet" href="app.css">
+  <script type="module" src="js/app.js"></script>
+</head>
+<body>
+  <!-- Màn hình khóa -->
+  <div id="lock" class="lock" hidden>
+    <form id="lockForm" class="card lock-card" autocomplete="off">
+      <img src="icons/icon-192.png" alt="" width="56" height="56">
+      <h1 id="lockTitle">Mở khóa</h1>
+      <p id="lockMsg" class="muted"></p>
+      <input id="lockPw" type="password" placeholder="Mật khẩu" aria-label="Mật khẩu" autocomplete="current-password">
+      <input id="lockPw2" type="password" placeholder="Nhập lại mật khẩu" aria-label="Nhập lại mật khẩu" autocomplete="new-password" hidden>
+      <p id="lockErr" class="err" role="alert"></p>
+      <button id="lockBtn" class="btn primary" type="submit">Mở khóa</button>
+      <div id="lockRestore" hidden>
+        <p class="muted small">Đã có file backup từ máy khác?</p>
+        <label class="btn small">Khôi phục từ backup<input id="restoreFile" type="file" accept=".ctgd,application/json" hidden></label>
+      </div>
+    </form>
+  </div>
+
+  <div id="app" hidden>
+    <header class="top">
+      <img src="icons/icon-192.png" alt="" width="36" height="36">
+      <div class="grow">
+        <h1>Chi tiêu gia đình</h1>
+        <p class="sub">🔒 Dữ liệu mã hóa, chỉ lưu trên máy này</p>
+      </div>
+      <button id="lockNow" class="btn small" type="button">Khóa</button>
+    </header>
+
+    <nav class="tabs" aria-label="Mục chính">
+      <button data-go="overview" class="active">📊<span>Tổng quan</span></button>
+      <button data-go="tx">📋<span>Giao dịch</span></button>
+      <button data-go="import">📥<span>Nhập file</span></button>
+      <button data-go="settings">⚙️<span>Cài đặt</span></button>
+    </nav>
+
+    <main>
+      <!-- Tổng quan -->
+      <section data-view="overview">
+        <div class="row-between">
+          <h2>Tổng quan</h2>
+          <select id="ovMonth" aria-label="Chọn tháng"></select>
+        </div>
+        <div id="ovBody"></div>
+      </section>
+
+      <!-- Giao dịch -->
+      <section data-view="tx" hidden>
+        <div class="card">
+          <div class="filters">
+            <input id="q" type="search" placeholder="Tìm nội dung, đối tác…" autocomplete="off">
+            <select id="fMonth" aria-label="Tháng"></select>
+            <select id="fKind" aria-label="Loại"></select>
+            <select id="fCat" aria-label="Danh mục"></select>
+            <select id="fAcc" aria-label="Tài khoản"></select>
+          </div>
+          <p id="txSummary" class="muted small"></p>
+          <div id="txList"></div>
+        </div>
+      </section>
+
+      <!-- Nhập file -->
+      <section data-view="import" hidden>
+        <div class="card upload" id="drop">
+          <h2>Thêm sao kê</h2>
+          <p>Chọn một hoặc nhiều file PDF, Excel (.xlsx, .xls) hoặc CSV của ngân hàng hay ví điện tử. Giao dịch trùng (do nhập lại file) sẽ tự bỏ qua.</p>
+          <label class="btn primary">Chọn file<input id="file" type="file" multiple accept=".pdf,.xlsx,.xls,.xlsm,.csv,application/pdf" hidden></label>
+          <p class="hint">Trên máy tính có thể kéo thả file vào ô này.</p>
+        </div>
+        <div id="files" aria-live="polite"></div>
+        <div class="card">
+          <h2>File đã nhập</h2>
+          <div id="history"></div>
+        </div>
+      </section>
+
+      <!-- Cài đặt -->
+      <section data-view="settings" hidden>
+        <div class="card">
+          <h2>Thành viên gia đình</h2>
+          <p class="muted small">Tên chủ tài khoản của các thành viên (mỗi dòng một tên, đúng như trên sao kê, không cần dấu). Tiền chuyển giữa các tài khoản này được tính là chuyển nội bộ, không tính là chi tiêu hay thu nhập.</p>
+          <textarea id="family" rows="4"></textarea>
+          <div class="actions"><button id="saveFamily" class="btn small primary" type="button">Lưu</button></div>
+        </div>
+        <div class="card">
+          <h2>Tài khoản của tôi</h2>
+          <p class="muted small">Tự thêm khi nhập sao kê. Có thể đặt tên dễ nhớ.</p>
+          <div id="accounts"></div>
+        </div>
+        <div class="card">
+          <h2>Quy tắc đã học</h2>
+          <p class="muted small">Mỗi khi bạn sửa danh mục và chọn "nhớ cho lần sau", app lưu một quy tắc ở đây.</p>
+          <div id="rules"></div>
+        </div>
+        <div class="card">
+          <h2>Backup</h2>
+          <p class="muted small">File backup được mã hóa bằng mật khẩu hiện tại của app. Muốn mở trên máy khác thì cần đúng mật khẩu đó.</p>
+          <div class="actions left">
+            <button id="exportBackup" class="btn primary" type="button">Xuất file backup</button>
+            <label class="btn">Nhập backup (gộp)<input id="importBackup" type="file" accept=".ctgd,application/json" hidden></label>
+          </div>
+        </div>
+        <div class="card">
+          <h2>Đổi mật khẩu</h2>
+          <form id="pwForm" class="stack" autocomplete="off">
+            <input id="pwOld" type="password" placeholder="Mật khẩu hiện tại" autocomplete="current-password">
+            <input id="pwNew" type="password" placeholder="Mật khẩu mới (ít nhất 8 ký tự)" autocomplete="new-password">
+            <input id="pwNew2" type="password" placeholder="Nhập lại mật khẩu mới" autocomplete="new-password">
+            <p id="pwErr" class="err" role="alert"></p>
+            <div class="actions"><button class="btn small primary" type="submit">Đổi mật khẩu</button></div>
+          </form>
+        </div>
+        <div class="card danger">
+          <h2>Xóa toàn bộ dữ liệu</h2>
+          <p class="muted small">Xóa mọi giao dịch, quy tắc và mật khẩu khỏi máy này. Không hoàn tác được, trừ khi bạn có file backup.</p>
+          <div class="actions left"><button id="wipe" class="btn danger" type="button">Xóa toàn bộ</button></div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Hộp nhập mật khẩu (PDF có mật khẩu, file backup) -->
+  <dialog id="pwDialog">
+    <form method="dialog">
+      <h3 id="pwTitle">Nhập mật khẩu</h3>
+      <p id="pwMsg" class="small"></p>
+      <input id="pwInput" type="password" autocomplete="off" aria-label="Mật khẩu">
+      <div class="dlg-actions">
+        <button value="cancel" type="submit" class="btn">Hủy</button>
+        <button value="ok" type="submit" class="btn primary">Mở</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Hộp xác nhận -->
+  <dialog id="confirmDialog">
+    <form method="dialog">
+      <h3 id="cfTitle">Xác nhận</h3>
+      <p id="cfMsg" class="small"></p>
+      <div class="dlg-actions">
+        <button value="cancel" type="submit" class="btn">Hủy</button>
+        <button value="ok" type="submit" id="cfOk" class="btn danger">Đồng ý</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Sửa phân loại giao dịch -->
+  <dialog id="txDialog" class="wide">
+    <form method="dialog">
+      <h3 id="txdTitle"></h3>
+      <p id="txdInfo" class="small muted"></p>
+      <label class="field">Loại
+        <select id="txdKind"></select>
+      </label>
+      <label class="field" id="txdCatWrap">Danh mục
+        <select id="txdCat"></select>
+      </label>
+      <label class="check"><input id="txdRemember" type="checkbox" checked> <span id="txdRememberText"></span></label>
+      <p id="txdSource" class="small muted"></p>
+      <div class="dlg-actions">
+        <button value="reset" type="submit" class="btn small" id="txdReset">Về mặc định</button>
+        <span class="grow"></span>
+        <button value="cancel" type="submit" class="btn">Hủy</button>
+        <button value="ok" type="submit" class="btn primary">Lưu</button>
+      </div>
+    </form>
+  </dialog>
+</body>
+</html>

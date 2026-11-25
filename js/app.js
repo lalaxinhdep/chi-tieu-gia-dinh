@@ -1,0 +1,614 @@
+// Giao diện chính: khóa/mở khóa, tổng quan, giao dịch, nhập file, cài đặt.
+import { parseFile } from './parsers/index.js';
+import * as store from './store.js';
+import { classifyAll, EXPENSE_CATS, INCOME_CATS, KINDS, isCounted, UNCATEGORIZED } from './classify.js';
+import { summarize, byMonth, monthsAvailable } from './reports.js';
+import { esc, fmtMoney, fmtSigned, fmtDate, maskAccount, norm } from './util.js';
+
+const $ = (s) => document.querySelector(s);
+const $$ = (s) => [...document.querySelectorAll(s)];
+const PAGE = 200;
+const AUTO_LOCK_MS = 5 * 60 * 1000;
+
+let lockMode = 'unlock';
+let view = 'overview';
+let txs = [];               // giao dịch đã phân loại
+let session = { results: [], pending: [] }; // kết quả đọc file trong lần mở này
+let shown = PAGE;
+
+// =============== Hộp thoại dùng chung ===============
+function askSecret(title, msg, okLabel = 'Mở') {
+  const dlg = $('#pwDialog');
+  $('#pwTitle').textContent = title;
+  $('#pwMsg').textContent = msg;
+  dlg.querySelector('button[value="ok"]').textContent = okLabel;
+  $('#pwInput').value = '';
+  return new Promise((resolve) => {
+    dlg.addEventListener('close', () => {
+      const v = dlg.returnValue === 'ok' ? $('#pwInput').value : null;
+      $('#pwInput').value = '';
+      resolve(v || null);
+    }, { once: true });
+    dlg.showModal();
+    $('#pwInput').focus();
+  });
+}
+
+function confirmBox(title, msg, okLabel = 'Đồng ý') {
+  const dlg = $('#confirmDialog');
+  $('#cfTitle').textContent = title;
+  $('#cfMsg').textContent = msg;
+  $('#cfOk').textContent = okLabel;
+  return new Promise((resolve) => {
+    dlg.addEventListener('close', () => resolve(dlg.returnValue === 'ok'), { once: true });
+    dlg.showModal();
+  });
+}
+
+function toast(msg) {
+  const el = document.createElement('div');
+  el.className = 'chart-tip';
+  el.style.cssText = 'left:50%;bottom:90px;transform:translateX(-50%)';
+  el.textContent = msg;
+  document.body.append(el);
+  setTimeout(() => el.remove(), 3500);
+}
+
+// =============== Khóa / mở khóa ===============
+async function showLock() {
+  const has = await store.hasVault();
+  lockMode = has ? 'unlock' : 'create';
+  $('#lockTitle').textContent = has ? 'Mở khóa' : 'Tạo mật khẩu cho app';
+  $('#lockMsg').textContent = has
+    ? 'Nhập mật khẩu để giải mã dữ liệu trên máy này.'
+    : 'Mọi dữ liệu được mã hóa bằng mật khẩu này và chỉ lưu trên máy. Quên mật khẩu thì không ai khôi phục được, kể cả người làm app, nên hãy xuất file backup thường xuyên.';
+  $('#lockBtn').textContent = has ? 'Mở khóa' : 'Tạo và bắt đầu';
+  $('#lockPw').autocomplete = has ? 'current-password' : 'new-password';
+  $('#lockPw2').hidden = has;
+  $('#lockRestore').hidden = has;
+  $('#lockErr').textContent = '';
+  $('#lockPw').value = '';
+  $('#lockPw2').value = '';
+  $('#app').hidden = true;
+  $('#lock').hidden = false;
+  $('#lockPw').focus();
+}
+
+$('#lockForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const pw = $('#lockPw').value;
+  const err = (m) => { $('#lockErr').textContent = m; };
+  if (lockMode === 'create') {
+    if (pw.length < 8) return err('Mật khẩu cần ít nhất 8 ký tự.');
+    if (pw !== $('#lockPw2').value) return err('Hai lần nhập không khớp.');
+  } else if (!pw) return err('Hãy nhập mật khẩu.');
+  const btn = $('#lockBtn');
+  const label = btn.textContent;
+  btn.disabled = true; btn.textContent = 'Đang xử lý…';
+  try {
+    if (lockMode === 'create') await store.create(pw); else await store.unlock(pw);
+  } catch (ex) {
+    err(ex.message);
+    return;
+  } finally {
+    btn.disabled = false; btn.textContent = label;
+    $('#lockPw').value = ''; $('#lockPw2').value = '';
+  }
+  openApp();
+});
+
+$('#restoreFile').addEventListener('change', async (e) => {
+  const f = e.target.files[0];
+  e.target.value = '';
+  if (!f) return;
+  const pw = await askSecret('Khôi phục backup', `Nhập mật khẩu đã dùng khi tạo "${f.name}". Sau khi khôi phục, đây cũng là mật khẩu mở app trên máy này.`);
+  if (!pw) return;
+  try {
+    const d = await store.readBackup(await f.text(), pw);
+    await store.create(pw, d);
+    openApp();
+    toast(`Đã khôi phục ${Object.keys(d.transactions).length} giao dịch.`);
+  } catch (ex) {
+    $('#lockErr').textContent = ex.message;
+  }
+});
+
+function openApp() {
+  $('#lock').hidden = true;
+  $('#app').hidden = false;
+  navigator.storage?.persist?.().catch(() => {});
+  refresh();
+  go(Object.keys(store.data.transactions).length ? 'overview' : 'import');
+}
+
+function doLock() {
+  store.lock();
+  txs = [];
+  session = { results: [], pending: [] };
+  for (const id of ['#ovBody', '#txList', '#files', '#history', '#accounts', '#rules']) $(id).innerHTML = '';
+  delete $('#ovMonth').dataset.init;
+  $('#family').value = '';
+  showLock();
+}
+$('#lockNow').addEventListener('click', doLock);
+
+let hiddenAt = 0;
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) hiddenAt = Date.now();
+  else if (store.isUnlocked() && hiddenAt && Date.now() - hiddenAt > AUTO_LOCK_MS) doLock();
+});
+
+// =============== Điều hướng ===============
+$$('.tabs button').forEach((b) => b.addEventListener('click', () => go(b.dataset.go)));
+
+function go(v) {
+  view = v;
+  $$('.tabs button').forEach((b) => b.classList.toggle('active', b.dataset.go === v));
+  $$('section[data-view]').forEach((s) => { s.hidden = s.dataset.view !== v; });
+  render();
+  window.scrollTo(0, 0);
+}
+
+function refresh() {
+  txs = classifyAll(store.data);
+  render();
+}
+
+function render() {
+  if (!store.isUnlocked()) return;
+  if (view === 'overview') renderOverview();
+  else if (view === 'tx') renderTx();
+  else if (view === 'import') renderImport();
+  else if (view === 'settings') renderSettings();
+}
+
+const accLabel = (key) => store.accountLabel(store.data.accounts[key]);
+const monthLabel = (m) => { const [y, mo] = m.split('-'); return `Tháng ${+mo}/${y}`; };
+function fmtShort(n) {
+  const a = Math.abs(n);
+  if (a >= 1e9) return (n / 1e9).toLocaleString('vi-VN', { maximumFractionDigits: 1 }) + ' tỷ';
+  if (a >= 1e6) return (n / 1e6).toLocaleString('vi-VN', { maximumFractionDigits: 1 }) + ' tr';
+  if (a >= 1e3) return Math.round(n / 1e3) + 'k';
+  return String(Math.round(n));
+}
+
+function fillMonthSelect(sel, months, allLabel, keep = true) {
+  const cur = sel.value;
+  sel.innerHTML = `<option value="">${esc(allLabel)}</option>` + months.map((m) => `<option value="${m}">${monthLabel(m)}</option>`).join('');
+  if (keep && [...sel.options].some((o) => o.value === cur)) sel.value = cur;
+  return sel.value;
+}
+
+// =============== Tổng quan ===============
+$('#ovMonth').addEventListener('change', renderOverview);
+
+function renderOverview() {
+  const months = monthsAvailable(txs);
+  const sel = $('#ovMonth');
+  fillMonthSelect(sel, months, 'Tất cả thời gian');
+  if (!sel.dataset.init && months.length) { sel.value = months[0]; sel.dataset.init = '1'; }
+  const month = sel.value;
+
+  if (!txs.length) {
+    $('#ovBody').innerHTML = `<div class="card empty">Chưa có dữ liệu. Vào <b>Nhập file</b> để thêm sao kê.</div>`;
+    return;
+  }
+  const s = summarize(txs, month);
+  const maxCat = Math.max(1, ...s.categories.map((c) => c.total));
+  const catRows = s.categories.filter((c) => Math.abs(c.total) >= 1).map((c) => {
+    const pct = s.expense > 0 ? Math.round((c.total / s.expense) * 100) : 0;
+    return `<button class="bar-row" data-cat="${esc(c.category)}" title="Xem giao dịch ${esc(c.category)}">
+      <span class="bar-label">${esc(c.category)}</span>
+      <span class="bar-track"><span class="bar-fill" style="width:${Math.max(0, (c.total / maxCat) * 100)}%; display:block"></span></span>
+      <span class="bar-val">${fmtMoney(c.total)}<small>${pct}%</small></span>
+    </button>`;
+  }).join('');
+  const maxInc = Math.max(1, ...s.incomeCategories.map((c) => c.total));
+  const incRows = s.incomeCategories.map((c) => `<button class="bar-row" data-cat="${esc(c.category)}" data-kind="income">
+      <span class="bar-label">${esc(c.category)}</span>
+      <span class="bar-track"><span class="bar-fill in" style="width:${(c.total / maxInc) * 100}%; display:block"></span></span>
+      <span class="bar-val">${fmtMoney(c.total)}</span>
+    </button>`).join('');
+
+  const months12 = byMonth(txs).slice(-12);
+  $('#ovBody').innerHTML = `
+    <dl class="kpis">
+      <div class="card kpi"><dt>Tiền vào</dt><dd class="in">${fmtMoney(s.income)}</dd></div>
+      <div class="card kpi"><dt>Tiền ra</dt><dd class="out">${fmtMoney(s.expense)}</dd></div>
+      <div class="card kpi net"><dt>Chênh lệch</dt><dd>${fmtSigned(s.net)}</dd></div>
+    </dl>
+    ${s.uncategorized ? `<p class="notice">Có ${s.uncategorized} giao dịch chưa phân loại. <button type="button" data-uncat>Phân loại ngay</button>. App sẽ nhớ cho những lần sau.</p>` : ''}
+    <p class="muted small">Không tính ${s.excludedCount} giao dịch (${fmtMoney(s.excluded)} đ) là trả nợ thẻ, chuyển nội bộ, tiết kiệm hoặc đã bỏ qua.</p>
+    <div class="card">
+      <h2>Chi theo danh mục</h2>
+      <div class="bars">${catRows || '<p class="empty">Không có khoản chi.</p>'}</div>
+    </div>
+    <div class="card">
+      <h2>Thu theo nguồn</h2>
+      <div class="bars">${incRows || '<p class="empty">Không có khoản thu.</p>'}</div>
+    </div>
+    <div class="card chart">
+      <h2>Thu và chi theo tháng</h2>
+      <div class="legend"><span><i style="background:var(--s-in)"></i>Tiền vào</span><span><i style="background:var(--s-out)"></i>Tiền ra</span></div>
+      ${monthlyChart(months12)}
+      <details class="table-view"><summary>Xem dạng bảng</summary>
+        <table><thead><tr><th>Tháng</th><th>Tiền vào</th><th>Tiền ra</th><th>Chênh lệch</th></tr></thead>
+        <tbody>${months12.slice().reverse().map((m) => `<tr><td>${monthLabel(m.month)}</td><td>${fmtMoney(m.income)}</td><td>${fmtMoney(m.expense)}</td><td>${fmtSigned(m.income - m.expense)}</td></tr>`).join('')}</tbody></table>
+      </details>
+    </div>`;
+}
+
+$('#ovBody').addEventListener('click', (e) => {
+  const row = e.target.closest('.bar-row');
+  if (row) {
+    go('tx');
+    fillTxFilters();
+    $('#fMonth').value = $('#ovMonth').value;
+    $('#fKind').value = row.dataset.kind || 'expense';
+    $('#fCat').value = row.dataset.cat;
+    shown = PAGE;
+    renderTx();
+    return;
+  }
+  if (e.target.closest('[data-uncat]')) {
+    go('tx');
+    fillTxFilters();
+    $('#fMonth').value = $('#ovMonth').value;
+    $('#fKind').value = 'expense';
+    $('#fCat').value = UNCATEGORIZED;
+    renderTx();
+  }
+});
+
+function niceMax(v) {
+  const p = 10 ** Math.floor(Math.log10(v));
+  for (const m of [1, 2, 2.5, 5, 10]) if (m * p >= v) return m * p;
+  return 10 * p;
+}
+
+/** Biểu đồ cột nhóm theo tháng, một trục, hai dãy (vào/ra). */
+function monthlyChart(rows) {
+  if (!rows.length) return '<p class="empty">Chưa có dữ liệu.</p>';
+  // Vẽ theo đúng bề rộng màn hình để chữ trên trục không bị thu nhỏ trên điện thoại.
+  const W = Math.round(Math.max(300, Math.min(640, window.innerWidth - 64))), H = 230, L = 46, R = 8, T = 10, B = 26;
+  const max = niceMax(Math.max(1, ...rows.flatMap((r) => [r.income, r.expense])));
+  const ph = H - T - B;
+  const gw = (W - L - R) / rows.length;
+  const bw = Math.max(4, Math.min(22, (gw - 12) / 2));
+  const y = (v) => T + ph - (Math.max(0, v) / max) * ph;
+  const bar = (x, v, cls) => {
+    const h = (Math.max(0, v) / max) * ph;
+    if (h < 0.5) return '';
+    const r = Math.min(4, h, bw / 2);
+    const y0 = T + ph;
+    return `<path class="${cls}" d="M${x},${y0} V${y0 - h + r} Q${x},${y0 - h} ${x + r},${y0 - h} H${x + bw - r} Q${x + bw},${y0 - h} ${x + bw},${y0 - h + r} V${y0} Z"/>`;
+  };
+  let grid = '';
+  for (let i = 0; i <= 4; i++) {
+    const v = (max / 4) * i;
+    grid += `<line class="grid" x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}"/><text x="${L - 6}" y="${y(v) + 4}" text-anchor="end">${fmtShort(v)}</text>`;
+  }
+  const groups = rows.map((r, i) => {
+    const cx = L + gw * i + gw / 2;
+    const [yy, mm] = r.month.split('-');
+    return `<g>
+      ${bar(cx - bw - 1, r.income, 'b-in')}${bar(cx + 1, r.expense, 'b-out')}
+      <text x="${cx}" y="${H - 8}" text-anchor="middle">${mm}/${yy.slice(2)}</text>
+      <rect class="hit" x="${L + gw * i}" y="${T}" width="${gw}" height="${ph}" data-tip="${esc(`${monthLabel(r.month)}|Tiền vào: ${fmtMoney(r.income)} đ|Tiền ra: ${fmtMoney(r.expense)} đ`)}"/>
+    </g>`;
+  }).join('');
+  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Thu và chi theo tháng">${grid}${groups}</svg>`;
+}
+
+// Chú thích khi rê chuột / chạm vào cột.
+const tip = document.createElement('div');
+tip.className = 'chart-tip';
+tip.hidden = true;
+document.body.append(tip);
+document.addEventListener('pointermove', (e) => {
+  const t = e.target.closest?.('[data-tip]');
+  if (!t) { tip.hidden = true; return; }
+  const [head, ...lines] = t.dataset.tip.split('|');
+  tip.innerHTML = `<b>${esc(head)}</b><br>${lines.map(esc).join('<br>')}`;
+  tip.hidden = false;
+  const x = Math.min(e.clientX + 14, window.innerWidth - tip.offsetWidth - 8);
+  tip.style.left = x + 'px';
+  tip.style.top = (e.clientY - tip.offsetHeight - 12) + 'px';
+});
+
+// =============== Giao dịch ===============
+for (const id of ['#q', '#fMonth', '#fKind', '#fCat', '#fAcc']) {
+  $(id).addEventListener(id === '#q' ? 'input' : 'change', () => {
+    if (id === '#fKind') fillCatFilter();
+    shown = PAGE;
+    renderTx();
+  });
+}
+
+function fillCatFilter() {
+  const k = $('#fKind').value;
+  const cats = k === 'income' ? INCOME_CATS : k === 'expense' ? EXPENSE_CATS : [...EXPENSE_CATS, ...INCOME_CATS];
+  const cur = $('#fCat').value;
+  $('#fCat').innerHTML = `<option value="">Mọi danh mục</option>` + cats.map((c) => `<option>${esc(c)}</option>`).join('');
+  if (cats.includes(cur)) $('#fCat').value = cur;
+}
+
+function fillTxFilters() {
+  fillMonthSelect($('#fMonth'), monthsAvailable(txs), 'Mọi tháng');
+  const kSel = $('#fKind');
+  if (!kSel.options.length) {
+    kSel.innerHTML = `<option value="">Mọi loại</option><option value="counted">Có tính (thu + chi)</option>` +
+      Object.entries(KINDS).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join('');
+  }
+  if (!$('#fCat').options.length) fillCatFilter();
+  const aSel = $('#fAcc');
+  const cur = aSel.value;
+  aSel.innerHTML = `<option value="">Mọi tài khoản</option>` +
+    Object.keys(store.data.accounts).map((k) => `<option value="${esc(k)}">${esc(accLabel(k))}</option>`).join('');
+  if ([...aSel.options].some((o) => o.value === cur)) aSel.value = cur;
+}
+
+function renderTx() {
+  fillTxFilters();
+  const q = norm($('#q').value);
+  const m = $('#fMonth').value, k = $('#fKind').value, c = $('#fCat').value, a = $('#fAcc').value;
+  const list = txs.filter((t) =>
+    (!m || t.date.startsWith(m)) &&
+    (!k || (k === 'counted' ? isCounted(t.kind) : t.kind === k)) &&
+    (!c || t.category === c) &&
+    (!a || t.account === a) &&
+    (!q || norm(`${t.merchant} ${t.description} ${t.counterparty}`).includes(q)));
+
+  const sum = list.reduce((s, t) => s + (isCounted(t.kind) ? t.amount : 0), 0);
+  $('#txSummary').textContent = `${list.length} giao dịch · tổng có tính: ${fmtSigned(sum)} đ`;
+  const body = list.slice(0, shown).map((t) => {
+    const main = t.merchant || t.counterparty || t.description;
+    const detail = t.description && t.description !== main ? t.description : '';
+    const counted = isCounted(t.kind);
+    const chip = counted
+      ? `<span class="chip ${t.category === UNCATEGORIZED ? 'unc' : ''}">${esc(t.category)}${t.source === 'manual' || t.source === 'rule' ? ' ✎' : ''}</span>`
+      : `<span class="chip">${esc(KINDS[t.kind])}</span>`;
+    return `<tr class="clickable ${counted ? '' : 'excluded'}" data-id="${esc(t.id)}">
+      <td class="date">${esc(fmtDate(t.date))}</td>
+      <td><div class="main">${esc(main)}</div>${chip}${detail ? `<div class="detail">${esc(detail)}</div>` : ''}</td>
+      <td class="acc detail">${esc(accLabel(t.account))}</td>
+      <td class="amt ${t.amount > 0 ? 'in' : 'out'}">${fmtSigned(t.amount)}</td>
+    </tr>`;
+  }).join('');
+  const more = list.length > shown ? `<div class="more"><button class="btn small" data-more>Xem thêm</button></div>` : '';
+  $('#txList').innerHTML = list.length
+    ? `<table class="tx"><thead><tr><th>Ngày</th><th>Nội dung</th><th>Tài khoản</th><th class="amt">Số tiền</th></tr></thead><tbody>${body}</tbody></table>${more}`
+    : '<p class="empty">Không có giao dịch phù hợp.</p>';
+}
+
+$('#txList').addEventListener('click', (e) => {
+  if (e.target.closest('[data-more]')) { shown += PAGE; renderTx(); return; }
+  const row = e.target.closest('tr[data-id]');
+  if (row) editTx(row.dataset.id);
+});
+
+// ----- Sửa phân loại -----
+function editTx(id) {
+  const t = txs.find((x) => x.id === id);
+  if (!t) return;
+  const dlg = $('#txDialog');
+  $('#txdTitle').textContent = `${fmtSigned(t.amount)} đ · ${t.merchant || t.counterparty || ''}`.trim();
+  $('#txdInfo').textContent = `${fmtDate(t.date)} · ${accLabel(t.account)}\n${t.description}`;
+  $('#txdKind').innerHTML = Object.entries(KINDS).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join('');
+  $('#txdKind').value = t.kind;
+  const fillCats = (kind) => {
+    const cats = kind === 'income' ? INCOME_CATS : EXPENSE_CATS;
+    $('#txdCat').innerHTML = cats.map((c) => `<option>${esc(c)}</option>`).join('');
+    $('#txdCatWrap').hidden = !isCounted(kind);
+  };
+  fillCats(t.kind);
+  if (t.category) $('#txdCat').value = t.category;
+  $('#txdKind').onchange = () => fillCats($('#txdKind').value);
+
+  const similar = txs.filter((x) => x.key === t.key).length;
+  $('#txdRemember').checked = true;
+  $('#txdRememberText').textContent = `Nhớ cho các giao dịch giống vậy, cả lần nhập sau (nhận theo “${t.key || '—'}”, hiện có ${similar} giao dịch)`;
+  $('#txdSource').textContent = {
+    manual: 'Đang dùng: bạn đã sửa tay giao dịch này.',
+    rule: 'Đang dùng: quy tắc bạn đã dạy.',
+    system: `Đang dùng: quy tắc có sẵn${t.note ? ` (${t.note})` : ''}.`,
+    auto: 'Đang dùng: đoán theo từ khóa.',
+  }[t.source] || '';
+  $('#txdReset').hidden = t.source !== 'manual';
+
+  dlg.addEventListener('close', async () => {
+    if (dlg.returnValue === 'reset') {
+      await store.setOverride(t.id, null);
+      refresh();
+      return;
+    }
+    if (dlg.returnValue !== 'ok') return;
+    const kind = $('#txdKind').value;
+    const category = isCounted(kind) ? $('#txdCat').value : '';
+    if ($('#txdRemember').checked && t.key) {
+      await store.upsertRule({ key: t.key, kind, category });
+      await store.setOverride(t.id, null); // để dòng này theo quy tắc chung
+    } else {
+      await store.setOverride(t.id, { kind, category });
+    }
+    refresh();
+  }, { once: true });
+  dlg.showModal();
+}
+
+// =============== Nhập file ===============
+$('#file').addEventListener('change', (e) => { handleFiles([...e.target.files]); e.target.value = ''; });
+const drop = $('#drop');
+drop.addEventListener('dragover', (e) => { e.preventDefault(); drop.classList.add('drag'); });
+drop.addEventListener('dragleave', () => drop.classList.remove('drag'));
+drop.addEventListener('drop', (e) => { e.preventDefault(); drop.classList.remove('drag'); handleFiles([...e.dataTransfer.files]); });
+
+async function handleFiles(files) {
+  for (const f of files) {
+    session.pending.push(f.name);
+    renderImport();
+    let r;
+    try {
+      r = await parseFile(f, {
+        askPassword: (retry) => askSecret('File có mật khẩu',
+          (retry ? 'Mật khẩu chưa đúng. ' : '') + `Nhập mật khẩu để mở "${f.name}". Mật khẩu chỉ dùng để mở file trên máy này và không được lưu lại.`),
+      });
+      if (!store.isUnlocked()) return;
+      r.saved = await store.importResult(r);
+    } catch (e) {
+      console.error(e);
+      r = { fileName: f.name, error: e?.message || String(e) };
+    }
+    session.pending = session.pending.filter((n) => n !== f.name);
+    session.results.unshift(r);
+    txs = classifyAll(store.data);
+    renderImport();
+  }
+}
+
+function checkLine(c) {
+  if (c.ok === true) return `<li class="ok">✓ ${esc(c.label)} khớp sao kê: ${fmtMoney(c.expected)}</li>`;
+  if (c.ok === false) return `<li class="bad">⚠ ${esc(c.label)}: sao kê ghi ${fmtMoney(c.expected)}, app đọc được ${fmtMoney(c.actual)} (lệch ${fmtMoney(Math.abs(c.expected - c.actual))})</li>`;
+  return `<li class="info">ℹ ${esc(c.label)}</li>`;
+}
+
+function renderImport() {
+  const cards = session.results.map((r) => {
+    if (r.error) {
+      return `<article class="card file error"><div class="file-head"><span class="file-name">${esc(r.fileName)}</span><span class="tag">Lỗi</span></div><p class="err">${esc(r.error)}</p></article>`;
+    }
+    const label = [r.bank, r.accountTypeLabel].filter(Boolean).join(' · ');
+    const cardsTxt = r.cards?.length ? ` (thẻ ${r.cards.map((c) => '••' + c).join(', ')})` : '';
+    return `<article class="card file">
+      <div class="file-head"><span class="file-name">${esc(r.fileName)}</span><span class="tag">${esc(label)}</span></div>
+      <dl class="stats">
+        <div><dt>Tài khoản</dt><dd>${esc((r.accountNo ? maskAccount(r.accountNo) : '') + cardsTxt) || '—'}</dd></div>
+        <div><dt>Kỳ sao kê</dt><dd>${esc(fmtDate(r.period.from))} – ${esc(fmtDate(r.period.to))}</dd></div>
+        <div><dt>Đã lưu</dt><dd>${r.saved.added} mới${r.saved.dup ? ` · ${r.saved.dup} trùng bỏ qua` : ''}</dd></div>
+        <div><dt>Tiền vào (thô)</dt><dd class="in">+${fmtMoney(r.inflow)}</dd></div>
+        <div><dt>Tiền ra (thô)</dt><dd class="out">−${fmtMoney(r.outflow)}</dd></div>
+      </dl>
+      <ul class="checks">${r.checks.map(checkLine).join('')}${r.warnings.map((w) => `<li class="info">ℹ ${esc(w)}</li>`).join('')}</ul>
+    </article>`;
+  });
+  const pending = session.pending.map((n) => `<article class="card file pending"><span class="file-name">${esc(n)}</span> <span class="muted">đang đọc…</span></article>`);
+  $('#files').innerHTML = pending.concat(cards).join('');
+
+  const files = store.data.files.slice().reverse();
+  $('#history').innerHTML = files.length ? files.map((f) => `<div class="list-row">
+      <div><div>${esc(f.name)} ${f.checksOk ? '' : '<span class="chip unc">tổng chưa khớp</span>'}</div>
+      <div class="detail">${esc(accLabel(f.account))} · ${esc(fmtDate(f.period?.from))} – ${esc(fmtDate(f.period?.to))} · ${f.added} giao dịch mới · nhập ${esc(new Date(f.importedAt).toLocaleDateString('vi-VN'))}</div></div>
+      <button class="btn small" data-delfile="${esc(f.id)}">Xóa</button>
+    </div>`).join('') : '<p class="empty">Chưa nhập file nào.</p>';
+}
+
+$('#history').addEventListener('click', async (e) => {
+  const id = e.target.closest('[data-delfile]')?.dataset.delfile;
+  if (!id) return;
+  const f = store.data.files.find((x) => x.id === id);
+  if (!(await confirmBox('Xóa file đã nhập?', `Xóa "${f.name}" và ${f.added} giao dịch được thêm từ file này. Quy tắc đã học vẫn giữ nguyên.`, 'Xóa'))) return;
+  await store.removeFile(id);
+  refresh();
+});
+
+// =============== Cài đặt ===============
+function renderSettings() {
+  const d = store.data;
+  $('#family').value = d.family.join('\n');
+  const accs = Object.values(d.accounts);
+  $('#accounts').innerHTML = accs.length ? accs.map((a) => `<div class="list-row">
+      <div class="detail" style="min-width:120px">${esc([a.bank, a.typeLabel].filter(Boolean).join(' · '))}<br>${esc(maskAccount(a.accountNo))}</div>
+      <input data-acc="${esc(a.key)}" value="${esc(a.name)}" placeholder="${esc(store.accountLabel({ ...a, name: '' }))}" aria-label="Tên tài khoản">
+    </div>`).join('') : '<p class="empty">Chưa có tài khoản nào.</p>';
+  const rules = d.rules.slice().reverse();
+  $('#rules').innerHTML = rules.length ? rules.map((r) => `<div class="list-row">
+      <div><div>“${esc(r.key)}”</div><div class="detail">→ ${esc(isCounted(r.kind) ? r.category : KINDS[r.kind])}</div></div>
+      <button class="btn small" data-delrule="${esc(r.key)}">Xóa</button>
+    </div>`).join('') : '<p class="empty">Chưa có quy tắc nào. Sửa danh mục một giao dịch trong mục Giao dịch để dạy app.</p>';
+}
+
+$('#saveFamily').addEventListener('click', async () => {
+  store.data.family = [];
+  for (const line of $('#family').value.split('\n')) if (line.trim()) store.addFamily(line);
+  await store.save();
+  refresh();
+  toast('Đã lưu danh sách thành viên.');
+});
+
+$('#accounts').addEventListener('change', async (e) => {
+  const key = e.target.dataset.acc;
+  if (!key) return;
+  store.data.accounts[key].name = e.target.value.trim();
+  await store.save();
+  refresh();
+});
+
+$('#rules').addEventListener('click', async (e) => {
+  const key = e.target.closest('[data-delrule]')?.dataset.delrule;
+  if (key == null) return;
+  await store.removeRule(key);
+  refresh();
+});
+
+$('#exportBackup').addEventListener('click', async () => {
+  const text = await store.exportBackup();
+  const blob = new Blob([text], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `chi-tieu-backup-${new Date().toISOString().slice(0, 10)}.ctgd`;
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+  toast('Đã xuất file backup (đã mã hóa).');
+});
+
+$('#importBackup').addEventListener('change', async (e) => {
+  const f = e.target.files[0];
+  e.target.value = '';
+  if (!f) return;
+  const pw = await askSecret('Nhập backup', `Nhập mật khẩu của file "${f.name}". Dữ liệu trong file sẽ được gộp vào dữ liệu hiện có, không ghi đè.`);
+  if (!pw) return;
+  try {
+    const other = await store.readBackup(await f.text(), pw);
+    const { added } = await store.mergeData(other);
+    refresh();
+    toast(`Đã gộp backup: thêm ${added} giao dịch.`);
+  } catch (ex) {
+    toast(ex.message);
+  }
+});
+
+$('#pwForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const err = (m) => { $('#pwErr').textContent = m; };
+  const [o, n, n2] = ['#pwOld', '#pwNew', '#pwNew2'].map((s) => $(s).value);
+  if (n.length < 8) return err('Mật khẩu mới cần ít nhất 8 ký tự.');
+  if (n !== n2) return err('Hai lần nhập mật khẩu mới không khớp.');
+  try {
+    await store.changePassword(o, n);
+    ['#pwOld', '#pwNew', '#pwNew2'].forEach((s) => { $(s).value = ''; });
+    err('');
+    toast('Đã đổi mật khẩu. Các file backup cũ vẫn mở bằng mật khẩu cũ.');
+  } catch (ex) {
+    err(ex.message);
+  }
+});
+
+$('#wipe').addEventListener('click', async () => {
+  const n = Object.keys(store.data.transactions).length;
+  if (!(await confirmBox('Xóa toàn bộ dữ liệu?', `Xóa vĩnh viễn ${n} giao dịch, mọi quy tắc và mật khẩu khỏi máy này. Không thể hoàn tác nếu bạn chưa có file backup.`, 'Xóa vĩnh viễn'))) return;
+  await store.wipe();
+  doLock();
+});
+
+// =============== Khởi động ===============
+if ('serviceWorker' in navigator && window.isSecureContext) {
+  navigator.serviceWorker.register('sw.js').catch((e) => console.warn('Không đăng ký được service worker', e));
+}
+if (!window.isSecureContext || !crypto.subtle) {
+  document.body.innerHTML = '<p style="padding:20px">App cần chạy qua HTTPS (hoặc localhost) để mã hóa dữ liệu.</p>';
+} else {
+  showLock();
+}
