@@ -34,11 +34,11 @@ export async function parseFile(file, { askPassword }) {
   throw new Error('Định dạng chưa hỗ trợ. Hãy dùng PDF, Excel (.xlsx, .xls) hoặc CSV.');
 }
 
-function finalize(r, file) {
+export function finalize(r, file) {
   const txs = r.transactions.filter((t) => t.date);
   const seen = new Map();
   for (const t of txs) {
-    const key = [r.bank, r.accountNo, t.date, t.amount, t.ref || '', t.description || ''].join('|');
+    const key = [r.accountKey || r.bank, r.accountNo, t.date, t.amount, t.ref || '', t.description || ''].join('|');
     const n = (seen.get(key) || 0) + 1;
     seen.set(key, n);
     t.id = hash(key + '|' + n);

@@ -1,6 +1,9 @@
 // Giao diện chính: khóa/mở khóa, tổng quan, giao dịch, nhập file, cài đặt.
-import { parseFile } from './parsers/index.js';
+import { parseFile, finalize } from './parsers/index.js';
 import * as store from './store.js';
+import { initLoans, bindLoanEvents, renderLoans, loansOverviewCard, loanFromImage } from './loans-ui.js';
+import { readImage, releaseOcr } from './ocr.js';
+import { loanFromRows, txsFromRows } from './parsers/image.js';
 import { classifyAll, categoryLists, EXPENSE_CATS, INCOME_CATS, KINDS, isCounted, UNCATEGORIZED } from './classify.js';
 import { summarize, byMonth, monthsAvailable, byParty, byAccount, savingsReport } from './reports.js';
 import { esc, fmtMoney, fmtSigned, fmtDate, maskAccount, norm, parseMoney } from './util.js';
@@ -13,7 +16,7 @@ const AUTO_LOCK_MS = 5 * 60 * 1000;
 let lockMode = 'unlock';
 let view = 'overview';
 let txs = [];               // giao dịch đã phân loại
-let session = { results: [], pending: [] }; // kết quả đọc file trong lần mở này
+let session = { results: [], pending: [], reviews: [] }; // kết quả đọc file trong lần mở này; reviews: giao dịch đọc từ ảnh chờ soát
 let shown = PAGE;
 let partyFilter = null;      // { key, name } khi xem giao dịch của một đối tác
 let partyAll = false;        // bảng đối tác: gồm cả khoản không tính
@@ -129,9 +132,11 @@ function openApp() {
 function doLock() {
   store.lock();
   txs = [];
-  session = { results: [], pending: [] };
+  session = { results: [], pending: [], reviews: [] };
   partyFilter = null; partyAll = false; partyExpanded = false;
-  for (const id of ['#ovBody', '#txList', '#files', '#history', '#accounts', '#rules', '#cats']) $(id).innerHTML = '';
+  for (const id of ['#ovBody', '#txList', '#files', '#history', '#accounts', '#rules', '#cats', '#loansBody']) $(id).innerHTML = '';
+  for (const d of ['#loanDialog', '#payDialog', '#txDialog']) if ($(d).open) $(d).close('cancel');
+  releaseOcr();
   delete $('#ovMonth').dataset.init;
   $('#family').value = '';
   showLock();
@@ -164,6 +169,7 @@ function render() {
   if (!store.isUnlocked()) return;
   if (view === 'overview') renderOverview();
   else if (view === 'tx') renderTx();
+  else if (view === 'loans') renderLoans();
   else if (view === 'import') renderImport();
   else if (view === 'settings') renderSettings();
 }
@@ -196,7 +202,7 @@ function renderOverview() {
   const month = sel.value;
 
   if (!txs.length) {
-    $('#ovBody').innerHTML = `<div class="card empty">Chưa có dữ liệu. Vào <b>Nhập file</b> để thêm sao kê.</div>`;
+    $('#ovBody').innerHTML = `<div class="card empty">Chưa có dữ liệu. Vào <b>Nhập file</b> để thêm sao kê.</div>${loansOverviewCard()}`;
     return;
   }
   const s = summarize(txs, month);
@@ -236,6 +242,7 @@ function renderOverview() {
     ${partyCard(month)}
     ${accountCard(month)}
     ${savingsCard(month)}
+    ${loansOverviewCard()}
     <div class="card chart">
       <h2>Thu và chi theo tháng</h2>
       <div class="legend"><span><i style="background:var(--s-in)"></i>Tiền vào</span><span><i style="background:var(--s-out)"></i>Tiền ra</span></div>
@@ -252,7 +259,7 @@ const lots = (n) => `${n} lần`;
 // Giải thích vì sao có giao dịch không tính vào Tiền vào / Tiền ra, tách theo từng loại.
 const EXCLUDED_WHY = {
   cc_payment: ['trả nợ thẻ tín dụng', 'tiền quẹt thẻ đã tính ở từng món mua, tính thêm khoản trả nợ là trùng'],
-  transfer: ['chuyển giữa tài khoản trong gia đình', 'tiền chỉ đổi chỗ, không phải chi hay thu; gồm cả món mua đã chuyển sang trả góp (tính theo từng kỳ)'],
+  transfer: ['chuyển giữa tài khoản trong gia đình', 'tiền chỉ đổi chỗ, không phải chi hay thu; gồm cả món mua đã chuyển sang trả góp (tính theo từng kỳ) và tiền giải ngân khoản vay'],
   savings: ['gửi / rút tiết kiệm', 'tiền vẫn là của mình, xem ở thẻ Tiết kiệm'],
   ignore: ['bạn tự loại khỏi báo cáo', 'ví dụ chuyển nhầm rồi trả lại'],
 };
@@ -349,6 +356,7 @@ function openTx({ kind = '', cat = '', acc = '', party = null, dir = '' } = {}) 
 }
 
 $('#ovBody').addEventListener('click', async (e) => {
+  if (e.target.closest('[data-goloans]')) return go('loans');
   const row = e.target.closest('.bar-row');
   if (row) return openTx({ kind: row.dataset.kind || 'expense', cat: row.dataset.cat });
   if (e.target.closest('[data-uncat]')) return openTx({ kind: 'expense', cat: UNCATEGORIZED });
@@ -631,8 +639,49 @@ drop.addEventListener('dragover', (e) => { e.preventDefault(); drop.classList.ad
 drop.addEventListener('dragleave', () => drop.classList.remove('drag'));
 drop.addEventListener('drop', (e) => { e.preventDefault(); drop.classList.remove('drag'); handleFiles([...e.dataTransfer.files]); });
 
+const isImage = (f) => f.type.startsWith('image/') || /\.(png|jpe?g|webp|heic|gif|bmp)$/i.test(f.name);
+
+/** Ảnh chụp: đọc chữ trên máy rồi đoán là màn hình khoản vay hay lịch sử giao dịch. */
+async function handleImage(f, { loanId = null, loanOnly = false } = {}) {
+  const status = (s) => { pendingStatus.set(f.name, s); renderImport(); };
+  session.pending.push(f.name);
+  if (loanOnly) toast('Đang đọc chữ trong ảnh…');
+  try {
+    const ocr = await readImage(f, status);
+    if (!store.isUnlocked()) return;
+    const loan = loanFromRows(ocr.rows);
+    const list = loanOnly ? [] : txsFromRows(ocr.rows);
+    if (loan.found >= 4 || (loanOnly && loan.found) || (loan.found >= 2 && list.length < 2)) {
+      const match = loanFromImage(loan.fields, loanId);
+      session.results.unshift({ fileName: f.name, info: `Ảnh thông tin khoản vay: đọc được ${loan.found} mục, đã mở form để bạn kiểm tra${match ? ' và cập nhật khoản vay đã có' : ''}.` });
+    } else if (list.length) {
+      const existing = txs.map((t) => `${t.date}|${Math.round(t.amount)}`);
+      session.reviews.unshift({
+        id: Math.random().toString(36).slice(2), fileName: f.name, fileSize: f.size, text: ocr.text,
+        account: Object.keys(store.data.accounts)[0] || '__new', newName: 'Ảnh chụp',
+        rows: list.map((t) => {
+          const dup = existing.includes(`${t.date}|${Math.round(t.amount)}`);
+          return { date: t.date, description: t.description, sign: t.amount > 0 ? 1 : -1, value: Math.abs(t.amount), signGuess: t.signGuess, dup, on: !dup };
+        }),
+      });
+    } else {
+      throw new Error(loanOnly ? 'Không thấy thông tin khoản vay trong ảnh. Hãy chụp màn hình chi tiết khoản vay trong app ngân hàng.' : 'Không tìm thấy giao dịch hay thông tin khoản vay trong ảnh. Ảnh cần rõ chữ, có ngày và số tiền.');
+    }
+  } catch (e) {
+    console.error(e);
+    session.results.unshift({ fileName: f.name, error: e?.message || String(e) });
+    if (loanOnly) toast(e?.message || String(e));
+  } finally {
+    session.pending = session.pending.filter((n) => n !== f.name);
+    pendingStatus.delete(f.name);
+    renderImport();
+  }
+}
+const pendingStatus = new Map();
+
 async function handleFiles(files) {
   for (const f of files) {
+    if (isImage(f)) { await handleImage(f); continue; }
     session.pending.push(f.name);
     renderImport();
     let r;
@@ -660,10 +709,40 @@ function checkLine(c) {
   return `<li class="info">ℹ ${esc(c.label)}</li>`;
 }
 
+function reviewCard(rv) {
+  const accs = Object.keys(store.data.accounts);
+  const on = rv.rows.filter((r) => r.on && r.date && r.value >= 1);
+  const rows = rv.rows.map((r, i) => `<tr class="${r.on ? '' : 'excluded'}" data-i="${i}">
+      <td><input type="checkbox" data-f="on" ${r.on ? 'checked' : ''} aria-label="Lưu dòng này"></td>
+      <td><input type="date" data-f="date" value="${esc(r.date)}" aria-label="Ngày"></td>
+      <td><input type="text" data-f="description" value="${esc(r.description)}" aria-label="Nội dung">${r.dup ? '<div class="detail warn">Có thể trùng: đã có giao dịch cùng ngày, cùng số tiền</div>' : ''}</td>
+      <td class="amt"><div class="amt-edit"><button type="button" class="btn small ${r.sign > 0 ? 'in' : 'out'}" data-sign title="Đổi chiều tiền vào / ra" aria-label="${r.sign > 0 ? 'Tiền vào' : 'Tiền ra'}, bấm để đổi">${r.sign > 0 ? '+' : '−'}</button><input type="text" inputmode="numeric" data-f="amount" value="${r.value ? fmtMoney(r.value) : ''}" aria-label="Số tiền"></div>${r.signGuess ? '<div class="detail">chiều tiền do app đoán</div>' : ''}</td>
+    </tr>`).join('');
+  return `<article class="card file review" data-rv="${esc(rv.id)}">
+    <div class="file-head"><span class="file-name">${esc(rv.fileName)}</span><span class="tag">Ảnh · chờ soát</span></div>
+    <p class="small muted">App đọc được ${rv.rows.length} giao dịch từ ảnh. Hãy soát ngày, nội dung, số tiền và chiều tiền (+ vào, − ra) rồi bấm Lưu. Bỏ chọn những dòng không phải giao dịch.</p>
+    <div class="review-acc">
+      <label class="field">Lưu vào tài khoản<select data-acc>${accs.map((k) => `<option value="${esc(k)}" ${rv.account === k ? 'selected' : ''}>${esc(accLabel(k))}</option>`).join('')}<option value="__new" ${rv.account === '__new' ? 'selected' : ''}>➕ Tài khoản mới…</option></select></label>
+      ${rv.account === '__new' ? `<label class="field">Tên tài khoản mới<input type="text" data-newname value="${esc(rv.newName)}" maxlength="40"></label>` : ''}
+    </div>
+    <div class="scroll-table"><table class="tx review-table"><thead><tr><th></th><th>Ngày</th><th>Nội dung</th><th class="amt">Số tiền</th></tr></thead><tbody>${rows}</tbody></table></div>
+    <details class="small"><summary>Chữ app đọc được trong ảnh</summary><pre class="ocr-text">${esc(rv.text)}</pre></details>
+    <div class="actions">
+      <button class="btn small" type="button" data-rvdrop>Bỏ ảnh này</button>
+      <button class="btn small" type="button" data-rvadd>+ Thêm dòng</button>
+      <button class="btn small primary" type="button" data-rvsave>Lưu ${on.length} giao dịch</button>
+    </div>
+  </article>`;
+}
+
 function renderImport() {
+  const reviews = session.reviews.map(reviewCard);
   const cards = session.results.map((r) => {
     if (r.error) {
       return `<article class="card file error"><div class="file-head"><span class="file-name">${esc(r.fileName)}</span><span class="tag">Lỗi</span></div><p class="err">${esc(r.error)}</p></article>`;
+    }
+    if (r.info) {
+      return `<article class="card file"><div class="file-head"><span class="file-name">${esc(r.fileName)}</span><span class="tag">Ảnh</span></div><p class="small">${esc(r.info)}</p></article>`;
     }
     const label = [r.bank, r.accountTypeLabel].filter(Boolean).join(' · ');
     const cardsTxt = r.cards?.length ? ` (thẻ ${r.cards.map((c) => '••' + c).join(', ')})` : '';
@@ -679,8 +758,8 @@ function renderImport() {
       <ul class="checks">${r.checks.map(checkLine).join('')}${r.warnings.map((w) => `<li class="info">ℹ ${esc(w)}</li>`).join('')}</ul>
     </article>`;
   });
-  const pending = session.pending.map((n) => `<article class="card file pending"><span class="file-name">${esc(n)}</span> <span class="muted">đang đọc…</span></article>`);
-  $('#files').innerHTML = pending.concat(cards).join('');
+  const pending = session.pending.map((n) => `<article class="card file pending"><span class="file-name">${esc(n)}</span> <span class="muted">${esc(pendingStatus.get(n) || 'đang đọc…')}</span></article>`);
+  $('#files').innerHTML = pending.concat(reviews, cards).join('');
 
   const files = store.data.files.slice().reverse();
   $('#history').innerHTML = files.length ? files.map((f) => `<div class="list-row">
@@ -689,6 +768,64 @@ function renderImport() {
       <button class="btn small" data-delfile="${esc(f.id)}">Xóa</button>
     </div>`).join('') : '<p class="empty">Chưa nhập file nào.</p>';
 }
+
+// ----- Soát giao dịch đọc từ ảnh -----
+const reviewOf = (el) => session.reviews.find((r) => r.id === el.closest('[data-rv]')?.dataset.rv);
+
+$('#files').addEventListener('change', (e) => {
+  const rv = reviewOf(e.target);
+  if (!rv) return;
+  if (e.target.matches('[data-acc]')) { rv.account = e.target.value; renderImport(); return; }
+  if (e.target.matches('[data-newname]')) { rv.newName = e.target.value.trim(); return; }
+  const tr = e.target.closest('tr[data-i]');
+  const f = e.target.dataset.f;
+  if (!tr || !f) return;
+  const row = rv.rows[+tr.dataset.i];
+  if (f === 'on') row.on = e.target.checked;
+  else if (f === 'amount') row.value = Math.abs(parseMoney(e.target.value) ?? 0);
+  else row[f] = e.target.value;
+  renderImport();
+});
+
+$('#files').addEventListener('click', async (e) => {
+  const rv = reviewOf(e.target);
+  if (!rv) return;
+  const tr = e.target.closest('tr[data-i]');
+  if (e.target.closest('[data-sign]') && tr) {
+    const row = rv.rows[+tr.dataset.i];
+    row.sign = -row.sign;
+    row.signGuess = false;
+    renderImport();
+    return;
+  }
+  if (e.target.closest('[data-rvadd]')) { rv.rows.push({ date: '', description: '', sign: -1, value: 0, on: true }); renderImport(); return; }
+  if (e.target.closest('[data-rvdrop]')) { session.reviews = session.reviews.filter((x) => x !== rv); renderImport(); return; }
+  if (!e.target.closest('[data-rvsave]')) return;
+  const rows = rv.rows.filter((r) => r.on && r.date && r.value >= 1);
+  if (!rows.length) { toast('Chưa có dòng nào đủ ngày và số tiền.'); return; }
+  const isNew = rv.account === '__new';
+  const name = rv.newName || 'Ảnh chụp';
+  const acc = isNew ? null : store.data.accounts[rv.account];
+  const r = finalize({
+    parser: 'image',
+    accountKey: isNew ? `img|${norm(name)}` : rv.account,
+    bank: acc ? acc.bank : name,
+    accountType: acc ? acc.type : 'unknown',
+    accountTypeLabel: acc ? acc.typeLabel : 'Ảnh chụp',
+    accountNo: acc ? acc.accountNo : '',
+    transactions: rows.map((t) => {
+      const amount = t.sign * Math.round(t.value);
+      return { date: t.date, description: t.description.trim(), merchant: t.description.trim(), counterparty: '', debit: amount < 0 ? -amount : 0, credit: amount > 0 ? amount : 0, amount, fromImage: true };
+    }),
+    checks: [{ ok: null, label: 'Đọc từ ảnh chụp, đã được bạn soát lại trước khi lưu.' }],
+    warnings: [],
+  }, { name: rv.fileName, size: rv.fileSize });
+  r.saved = await store.importResult(r);
+  session.reviews = session.reviews.filter((x) => x !== rv);
+  session.results.unshift(r);
+  refresh();
+  toast(`Đã lưu ${r.saved.added} giao dịch từ ảnh.`);
+});
 
 $('#history').addEventListener('click', async (e) => {
   const id = e.target.closest('[data-delfile]')?.dataset.delfile;
@@ -826,6 +963,15 @@ $('#wipe').addEventListener('click', async () => {
   if (!(await confirmBox('Xóa toàn bộ dữ liệu?', `Xóa vĩnh viễn ${n} giao dịch, mọi quy tắc và mật khẩu khỏi máy này. Không thể hoàn tác nếu bạn chưa có file backup.`, 'Xóa vĩnh viễn'))) return;
   await store.wipe();
   doLock();
+});
+
+// =============== Khoản vay ===============
+initLoans({ getTxs: () => txs, toast, confirmBox, refresh });
+bindLoanEvents((file, loanId) => handleImage(file, { loanId, loanOnly: true }));
+// Enter trong form dài: không đóng hộp thoại (nút đầu là Hủy); trong hộp ghi nhận khoản trả: Lưu.
+$('#loanDialog').addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.matches('input')) e.preventDefault(); });
+$('#payDialog').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && e.target.matches('input:not([type="checkbox"])')) { e.preventDefault(); $('#payDialog').close('ok'); }
 });
 
 // =============== Khởi động ===============

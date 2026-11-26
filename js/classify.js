@@ -5,7 +5,7 @@ import { norm } from './util.js';
 export const EXPENSE_CATS = [
   'Ăn uống', 'Đi chợ & siêu thị', 'Mua sắm online', 'Mua sắm', 'Di chuyển', 'Hóa đơn & tiện ích',
   'Giải trí & đăng ký', 'Sức khỏe', 'Giáo dục & con cái', 'Làm đẹp', 'Du lịch', 'Quà tặng & hiếu hỉ',
-  'Bảo hiểm', 'Phí & lãi ngân hàng', 'Trả góp', 'Chuyển khoản cá nhân', 'Chưa phân loại',
+  'Bảo hiểm', 'Phí & lãi ngân hàng', 'Trả nợ vay', 'Trả góp', 'Chuyển khoản cá nhân', 'Chưa phân loại',
 ];
 export const INCOME_CATS = ['Lương', 'Lãi tiết kiệm', 'Hoàn tiền & thưởng', 'Thu khác'];
 export const KINDS = {
@@ -120,6 +120,16 @@ function structural(t, ctx) {
   if (/tra gop hang ky|installment repayment|gd goc tra gop|tra gop ky han \d+\/\d+/.test(d)) return { kind: 'expense', category: 'Trả góp' };
   if (/phi (chuyen doi )?tra gop/.test(d)) return { kind: 'expense', category: 'Phí & lãi ngân hàng' };
 
+  // Khoản vay: trả nợ là tiền ra; tiền giải ngân là tiền vay, không phải thu nhập.
+  const compact = d.replace(/[^0-9a-z]/g, '');
+  if (t.amount < 0 && (ctx.loanIds.some((x) => compact.includes(x))
+    || /thu no vay|tra no vay|tra no khoan vay|thanh toan khoan vay|thanh toan no vay|thu goc vay|thu lai vay|tra goc vay|tra lai vay|loan repayment|tat toan khoan vay/.test(d))) {
+    return { kind: 'expense', category: 'Trả nợ vay' };
+  }
+  if (t.amount > 0 && /giai ngan|loan disbursement/.test(d)) {
+    return { kind: 'transfer', category: '', note: 'Giải ngân khoản vay (tiền vay, không phải thu nhập)' };
+  }
+
   // Lãi tiền gửi / sinh lời: thu nhập.
   if (t.amount > 0 && /tra lai so du|tra lai tien gui|loi nhuan sinh loi|lai tien gui|\binterest\b/.test(d)) {
     return { kind: 'income', category: 'Lãi tiết kiệm' };
@@ -176,7 +186,9 @@ export function buildContext(data) {
     if (buy) installmentPairs.add(buy.id);
   }
   const incomeCats = new Set(categoryLists(data).income);
-  return { family, rules, overrides: data.overrides, installmentPairs, incomeCats };
+  const loanIds = (data.loans || []).flatMap((l) => [l.accountNo, l.contract])
+    .map((x) => String(x || '').replace(/[^0-9a-z]/gi, '').toLowerCase()).filter((x) => x.length >= 6);
+  return { family, rules, overrides: data.overrides, installmentPairs, incomeCats, loanIds };
 }
 
 export function classify(t, ctx) {

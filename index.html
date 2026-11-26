@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <!-- Chỉ cho phép tải mã thư viện; không có địa chỉ nào để gửi dữ liệu đi. -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net https://cdn.sheetjs.com blob:; worker-src 'self' blob: https://cdn.jsdelivr.net; connect-src 'self' https://cdn.jsdelivr.net https://cdn.sheetjs.com; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; object-src 'none'; base-uri 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval' https://cdn.jsdelivr.net https://cdn.sheetjs.com blob:; worker-src 'self' blob: https://cdn.jsdelivr.net; connect-src 'self' data: https://cdn.jsdelivr.net https://cdn.sheetjs.com; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; object-src 'none'; base-uri 'none'">
   <meta name="referrer" content="no-referrer">
   <meta name="theme-color" content="#0f766e">
   <link rel="manifest" href="manifest.webmanifest">
@@ -47,6 +47,7 @@
     <nav class="tabs" aria-label="Mục chính">
       <button data-go="overview" class="active">📊<span>Tổng quan</span></button>
       <button data-go="tx">📋<span>Giao dịch</span></button>
+      <button data-go="loans">🏦<span>Khoản vay</span></button>
       <button data-go="import">📥<span>Nhập file</span></button>
       <button data-go="settings">⚙️<span>Cài đặt</span></button>
     </nav>
@@ -87,13 +88,18 @@
         </div>
       </section>
 
+      <!-- Khoản vay -->
+      <section data-view="loans" hidden>
+        <div id="loansBody"></div>
+      </section>
+
       <!-- Nhập file -->
       <section data-view="import" hidden>
         <div class="card upload" id="drop">
           <h2>Thêm sao kê</h2>
-          <p>Chọn một hoặc nhiều file PDF, Excel (.xlsx, .xls) hoặc CSV của ngân hàng hay ví điện tử. Giao dịch trùng (do nhập lại file) sẽ tự bỏ qua.</p>
-          <label class="btn primary">Chọn file<input id="file" type="file" multiple accept=".pdf,.xlsx,.xls,.xlsm,.csv,application/pdf" hidden></label>
-          <p class="hint">Trên máy tính có thể kéo thả file vào ô này.</p>
+          <p>Chọn một hoặc nhiều file PDF, Excel (.xlsx, .xls), CSV, hoặc <b>ảnh chụp màn hình</b> (lịch sử giao dịch, thông tin khoản vay). Nhập lại file cũ thì giao dịch đã có chỉ được cập nhật, không bị nhân đôi.</p>
+          <label class="btn primary">Chọn file<input id="file" type="file" multiple accept=".pdf,.xlsx,.xls,.xlsm,.csv,application/pdf,image/*" hidden></label>
+          <p class="hint">Trên máy tính có thể kéo thả file vào ô này. Ảnh được đọc chữ ngay trên máy, không gửi đi đâu; lần đầu cần tải bộ đọc chữ khoảng 15 MB.</p>
         </div>
         <div id="files" aria-live="polite"></div>
         <div class="card">
@@ -178,6 +184,37 @@
       <div class="dlg-actions">
         <button value="cancel" type="submit" class="btn">Hủy</button>
         <button value="ok" type="submit" id="cfOk" class="btn danger">Đồng ý</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Thông tin khoản vay -->
+  <dialog id="loanDialog" class="xwide">
+    <form method="dialog" autocomplete="off">
+      <h3 id="loanTitle"></h3>
+      <p id="loanNote" class="small muted"></p>
+      <div id="loanFields" class="loan-fields"></div>
+      <div class="dlg-actions sticky">
+        <button value="cancel" type="submit" class="btn">Hủy</button>
+        <button value="ok" type="submit" class="btn primary">Lưu</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Ghi nhận một lần trả nợ -->
+  <dialog id="payDialog" class="wide">
+    <form method="dialog" autocomplete="off">
+      <h3 id="payTitle"></h3>
+      <label class="field">Ngày trả<input name="date" type="date"></label>
+      <label class="field">Tổng số tiền đã trả (đ)<input name="amount" inputmode="numeric"></label>
+      <label class="field">Trong đó tiền gốc (đ)<input name="principal" inputmode="numeric"></label>
+      <label class="field">Trong đó tiền lãi (đ)<input name="interest" inputmode="numeric"></label>
+      <p id="paySplitNote" class="small muted"></p>
+      <label class="field">Ghi chú<input name="note" type="text" maxlength="120"></label>
+      <label class="check"><input name="apply" type="checkbox" checked> <span>Trừ phần gốc vào dư nợ, cộng vào số đã trả gốc / lãi</span></label>
+      <div class="dlg-actions">
+        <button value="cancel" type="submit" class="btn">Hủy</button>
+        <button value="ok" type="submit" class="btn primary">Lưu</button>
       </div>
     </form>
   </dialog>

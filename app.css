@@ -250,3 +250,53 @@ dialog { border: 1px solid var(--line); border-radius: var(--radius); background
 dialog::backdrop { background: rgba(0,0,0,.45); }
 dialog input { width: 100%; min-height: 44px; margin: 10px 0 16px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--text); font: inherit; padding: 0 12px; }
 .dlg-actions { display: flex; gap: 8px; justify-content: flex-end; }
+
+/* ---------- Khoản vay ---------- */
+dialog.xwide { width: min(96vw, 720px); max-height: 92dvh; padding-bottom: 0; }
+.loan-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; }
+.loan-fields h4 { grid-column: 1 / -1; margin: 14px 0 0; font-size: 14px; color: var(--brand); border-bottom: 1px solid var(--line); padding-bottom: 4px; }
+.loan-fields .field { margin: 6px 0; }
+.loan-fields .field.full { grid-column: 1 / -1; }
+.loan-fields input, .loan-fields select, .loan-fields textarea { width: 100%; min-height: 40px; margin: 0; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--text); font: inherit; padding: 0 10px; }
+.loan-fields textarea { padding: 8px 10px; resize: vertical; }
+.loan-fields small { font-size: 11px; }
+.loan-fields .ocr { border: 2px solid var(--brand); background: color-mix(in srgb, var(--brand) 8%, var(--bg)); }
+@media (max-width: 560px) { .loan-fields { grid-template-columns: 1fr; } }
+.dlg-actions.sticky { position: sticky; bottom: 0; background: var(--card); padding: 12px 0 16px; margin-top: 8px; border-top: 1px solid var(--line); }
+.progress { height: 10px; border-radius: 99px; background: var(--bg); border: 1px solid var(--line); overflow: hidden; margin: 12px 0 4px; }
+.progress span { display: block; height: 100%; background: var(--brand); border-radius: 99px; }
+.loan .checks { margin-top: 10px; }
+.loan-sec { border-top: 1px solid var(--line); padding: 8px 0; }
+.loan-sec > summary { cursor: pointer; font-weight: 500; font-size: 14px; padding: 4px 0; }
+.loan-sec h4 { margin: 12px 0 0; font-weight: 500; color: var(--muted); }
+.scroll-table { max-height: 380px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; }
+.scroll-table thead th { position: sticky; top: 0; background: var(--card); }
+.tx.sched td { padding: 5px 8px; font-size: 13px; }
+.tx.sched tr.rate-change td { background: var(--warn-bg); }
+.prepay-form { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; }
+.prepay-form .actions, .prepay-form .prepay-out { grid-column: 1 / -1; }
+.prepay-form input, .prepay-form select, .review-acc input, .review-acc select { width: 100%; min-height: 38px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--text); font: inherit; padding: 0 8px; }
+@media (max-width: 560px) { .prepay-form { grid-template-columns: 1fr; } }
+.loan-alerts { margin: 6px 0 0; padding-left: 18px; font-size: 13px; color: var(--warn); display: grid; gap: 4px; }
+/* Soát giao dịch đọc từ ảnh */
+.review-acc { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; }
+@media (max-width: 560px) { .review-acc { grid-template-columns: 1fr; } }
+.review-table td { padding: 4px; vertical-align: top; }
+.review-table input[type="text"], .review-table input[type="date"] { width: 100%; min-height: 34px; border-radius: 6px; border: 1px solid var(--line); background: var(--bg); color: var(--text); font: inherit; font-size: 13px; padding: 0 6px; }
+.review-table input[type="checkbox"] { width: 18px; height: 18px; margin-top: 8px; }
+.review-table td:nth-child(2) { width: 140px; }
+.review-table td.amt { width: 170px; }
+.amt-edit { display: flex; gap: 4px; }
+.amt-edit .btn { min-width: 34px; padding: 0; font-size: 16px; font-weight: 700; }
+.amt-edit input { text-align: right; }
+.review-table tr.excluded input[type="text"], .review-table tr.excluded input[type="date"] { opacity: .5; }
+.detail.warn { color: var(--warn); }
+.ocr-text { white-space: pre-wrap; font-size: 12px; max-height: 240px; overflow: auto; background: var(--bg); padding: 8px; border-radius: 8px; }
+@media (max-width: 640px) {
+  .review-table, .review-table tbody { display: block; }
+  .review-table thead { display: none; }
+  .review-table tr { display: grid; grid-template-columns: 28px 1fr 1fr; gap: 4px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+  .review-table td { display: block; border: 0; width: auto !important; padding: 0; }
+  .review-table td:nth-child(1) { grid-row: span 2; }
+  .review-table td:nth-child(3) { grid-column: 2 / -1; grid-row: 2; }
+}

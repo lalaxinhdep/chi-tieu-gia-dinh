@@ -21,6 +21,7 @@ const emptyData = () => ({
   family: [],        // tên chủ tài khoản trong gia đình (chuyển giữa họ = nội bộ)
   categories: { expense: [], income: [] }, // danh mục tự thêm
   savings: { opening: null, asOf: '' },     // số dư tiết kiệm đầu kỳ (tính từ đầu ngày asOf)
+  loans: [],         // khoản vay: { id, ...trường thông tin, payments: [{ id, date, amount, principal, interest, note, txId, applied }] }
 });
 
 function migrate(d) {
@@ -96,7 +97,7 @@ export function addFamily(name) {
 }
 
 export async function importResult(r) {
-  const accKey = `${r.bank || r.fileName}|${r.accountType}|${r.accountNo || ''}`;
+  const accKey = r.accountKey || `${r.bank || r.fileName}|${r.accountType}|${r.accountNo || ''}`;
   data.accounts[accKey] ??= {
     key: accKey, bank: r.bank, type: r.accountType, typeLabel: r.accountTypeLabel,
     accountNo: r.accountNo, holder: r.holder || '', name: '',
@@ -169,6 +170,60 @@ export async function setSavings(opening, asOf) {
   await save();
 }
 
+// ---------- Khoản vay ----------
+const newId = () => toB64(randomBytes(9)).replace(/[+/=]/g, '');
+
+export async function saveLoan(loan) {
+  if (!loan.id) loan.id = newId();
+  loan.payments ??= [];
+  const i = data.loans.findIndex((l) => l.id === loan.id);
+  if (i >= 0) data.loans[i] = loan; else data.loans.push(loan);
+  await save();
+  return loan;
+}
+
+export async function removeLoan(id) {
+  data.loans = data.loans.filter((l) => l.id !== id);
+  await save();
+}
+
+/** Ghi nhận một lần trả nợ. applied: trừ phần gốc vào dư nợ, cộng vào số đã trả. */
+export async function addLoanPayment(loanId, p, apply) {
+  const l = data.loans.find((x) => x.id === loanId);
+  const pay = { ...p, id: newId(), applied: false, prev: null };
+  if (apply && (p.principal || p.interest)) {
+    pay.prev = { outstanding: l.outstanding ?? null, outstandingAsOf: l.outstandingAsOf || '', paidPrincipal: l.paidPrincipal ?? null, paidInterest: l.paidInterest ?? null };
+    const paidBefore = l.paidPrincipal ?? (l.disbursed != null && l.outstanding != null ? l.disbursed - l.outstanding : 0);
+    if (p.principal) {
+      if (l.outstanding != null) l.outstanding = Math.max(0, l.outstanding - p.principal);
+      l.paidPrincipal = paidBefore + p.principal;
+    }
+    if (p.interest) l.paidInterest = (l.paidInterest || 0) + p.interest;
+    if (!l.outstandingAsOf || p.date > l.outstandingAsOf) l.outstandingAsOf = p.date;
+    pay.applied = true;
+  }
+  l.payments.push(pay);
+  l.payments.sort((a, b) => (a.date < b.date ? 1 : -1));
+  await save();
+}
+
+/** Xóa một lần trả; nếu đã trừ vào dư nợ thì cộng lại. */
+export async function removeLoanPayment(loanId, payId) {
+  const l = data.loans.find((x) => x.id === loanId);
+  const p = l.payments.find((x) => x.id === payId);
+  if (!p) return;
+  if (p.applied) {
+    if (p.principal) {
+      if (l.outstanding != null) l.outstanding += p.principal;
+      if (l.paidPrincipal != null) l.paidPrincipal = p.prev?.paidPrincipal ?? Math.max(0, l.paidPrincipal - p.principal);
+    }
+    if (p.interest && l.paidInterest != null) l.paidInterest = Math.max(0, l.paidInterest - p.interest);
+  }
+  if (p.prevNext != null) l.nextPayment = p.prevNext;
+  l.payments = l.payments.filter((x) => x.id !== payId);
+  await save();
+}
+
 // ---------- Backup ----------
 export async function exportBackup() {
   const { iv, ct } = await encryptJSON(key, data);
@@ -205,6 +260,7 @@ export async function mergeData(other) {
     for (const c of other.categories[k]) if (!data.categories[k].includes(c)) data.categories[k].push(c);
   }
   if (data.savings.opening == null && other.savings.opening != null) data.savings = other.savings;
+  for (const l of other.loans) if (!data.loans.some((x) => x.id === l.id)) data.loans.push(l);
   await save();
   return { added };
 }
