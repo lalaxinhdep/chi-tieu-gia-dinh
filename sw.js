@@ -1,11 +1,11 @@
 // Service worker: cho app mở được khi không có mạng và cài được như app trên điện thoại.
 // Không bao giờ gửi dữ liệu đi; chỉ lưu đệm mã của app và các thư viện đã ghim phiên bản.
-const VERSION = 'ctgd-v4';
+const VERSION = 'ctgd-v5';
 const SHELL = [
   './', 'index.html', 'app.css', 'manifest.webmanifest',
   'js/app.js', 'js/util.js', 'js/crypto.js', 'js/idb.js', 'js/store.js', 'js/classify.js', 'js/reports.js',
   'js/parsers/index.js', 'js/parsers/pdf-text.js', 'js/parsers/pdf-layout.js',
-  'js/parsers/techcombank-account.js', 'js/parsers/techcombank-credit.js', 'js/parsers/excel-generic.js',
+  'js/parsers/techcombank-account.js', 'js/parsers/techcombank-credit.js', 'js/parsers/excel-generic.js', 'js/parsers/vib-credit.js',
   'icons/icon-192.png', 'icons/icon-512.png',
 ];
 const LIB_HOSTS = ['cdn.jsdelivr.net', 'cdn.sheetjs.com'];

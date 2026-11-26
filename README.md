@@ -6,6 +6,8 @@ Web app (PWA) quản lý chi tiêu từ file sao kê ngân hàng/ví. File đư�
 
 - [x] **Đọc file sao kê**
   - PDF Techcombank: sao kê thẻ tín dụng, sổ phụ tài khoản thanh toán. App tự đối chiếu tổng ghi nợ/ghi có với số in trên sao kê.
+  - PDF VIB: sao kê thẻ tín dụng (cả bản khổ dọc bị cắt đôi cột số tiền sang trang sau). Phân loại thêm theo mã MCC.
+  - Trả góp ghi rõ kỳ thứ mấy, món gì, tổng khoản (Techcombank lấy từ mục "B. Thông tin trả góp"). Nhập lại file cũ để cập nhật.
   - Excel/CSV bất kỳ: tự tìm dòng tiêu đề và đoán các cột Ngày, Ghi nợ, Ghi có, Số tiền, Diễn giải.
   - PDF có mật khẩu: app hỏi mật khẩu để mở và không lưu lại. Nhập lại file cũ thì giao dịch trùng tự bỏ qua.
 - [x] **Lưu mã hóa trên máy**: IndexedDB, AES-GCM 256, khóa sinh từ mật khẩu bằng PBKDF2-SHA256 (600.000 vòng). Tự khóa khi rời app quá 5 phút.

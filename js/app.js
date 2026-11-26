@@ -672,7 +672,7 @@ function renderImport() {
       <dl class="stats">
         <div><dt>Tài khoản</dt><dd>${esc((r.accountNo ? maskAccount(r.accountNo) : '') + cardsTxt) || '—'}</dd></div>
         <div><dt>Kỳ sao kê</dt><dd>${esc(fmtDate(r.period.from))} – ${esc(fmtDate(r.period.to))}</dd></div>
-        <div><dt>Đã lưu</dt><dd>${r.saved.added} mới${r.saved.dup ? ` · ${r.saved.dup} trùng bỏ qua` : ''}</dd></div>
+        <div><dt>Đã lưu</dt><dd>${r.saved.added} mới${r.saved.dup ? ` · ${r.saved.dup} đã có (cập nhật lại)` : ''}</dd></div>
         <div><dt>Tiền vào (thô)</dt><dd class="in">+${fmtMoney(r.inflow)}</dd></div>
         <div><dt>Tiền ra (thô)</dt><dd class="out">−${fmtMoney(r.outflow)}</dd></div>
       </dl>

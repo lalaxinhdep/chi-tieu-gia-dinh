@@ -105,7 +105,13 @@ export async function importResult(r) {
   const fileId = `${r.fileName}|${r.fileSize}|${Date.now()}`;
   let added = 0, dup = 0;
   for (const t of r.transactions) {
-    if (data.transactions[t.id]) { dup++; continue; }
+    const old = data.transactions[t.id];
+    if (old) {
+      // Đã có: cập nhật thông tin đọc được (vd. tên món trả góp), giữ tài khoản và file gốc.
+      data.transactions[t.id] = { ...t, account: old.account, file: old.file };
+      dup++;
+      continue;
+    }
     data.transactions[t.id] = { ...t, account: accKey, file: fileId };
     added++;
   }

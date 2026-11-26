@@ -79,22 +79,46 @@ export function keywordCategory(t) {
   return null;
 }
 
+// Mã ngành nghề (MCC) in trên sao kê thẻ, dùng khi tên nơi bán không khớp từ khóa nào.
+const MCC = [
+  ['Ăn uống', /^58(12|13|14)$/],
+  ['Đi chợ & siêu thị', /^(5411|5422|5441|5451|5462|5499|5300|5331)$/],
+  ['Di chuyển', /^(4111|4121|4131|4784|4789|5541|5542|7523|7512)$/],
+  ['Hóa đơn & tiện ích', /^(4812|4814|4816|4899|4900)$/],
+  ['Sức khỏe', /^(5122|5912|80[0-9]{2})$/],
+  ['Giáo dục & con cái', /^(82\d{2}|5942|5943|5641)$/],
+  ['Làm đẹp', /^(7230|7297|7298|5977)$/],
+  ['Du lịch', /^(3\d{3}|4411|4511|4722|7011|7012|7033)$/],
+  ['Bảo hiểm', /^(6300|5960)$/],
+  ['Giải trí & đăng ký', /^(5815|5816|5817|5818|7832|7841|7922|7991|7994|7996|7999)$/],
+  ['Phí & lãi ngân hàng', /^(6010|6011)$/],
+  ['Mua sắm', /^5\d{3}$/],
+];
+function mccCategory(mcc) {
+  const code = String(mcc || '').match(/^(\d{4})/)?.[1];
+  if (!code) return null;
+  return MCC.find(([, re]) => re.test(code))?.[0] || null;
+}
+
+// Khoản ghi có khi đổi một món mua sang trả góp (TCB: "Chuyển sang trả góp", VIB: "CHUYEN TRA GOP KY HAN 3 THANG").
+const INSTALLMENT_CONVERT = /chuyen sang tra gop|debt transfer to installment|chuyen tra gop ky han/;
+
 /** Quy tắc cấu trúc: những trường hợp nhận ra chắc chắn từ nội dung giao dịch. */
 function structural(t, ctx) {
   const d = norm(t.description);
   const p = norm(t.counterparty);
 
   // Trả nợ thẻ tín dụng: không phải chi tiêu (chi tiêu đã tính ở từng giao dịch quẹt thẻ).
-  if (/thanh toan no the tin dung|thanh toan the tin dung|tt the tin dung|credit card payment/.test(d)) {
+  if (/thanh toan no the tin dung|thanh toan the tin dung|tt the tin dung|credit card payment|thanh toan sao ke the/.test(d)) {
     return { kind: 'cc_payment', category: '' };
   }
   // Mua hàng chuyển sang trả góp: món mua và khoản "chuyển sang trả góp" triệt tiêu nhau,
-  // chi tiêu được tính dần theo từng kỳ "Trả góp hàng kỳ".
-  if (/chuyen sang tra gop|debt transfer to installment/.test(d) || ctx.installmentPairs.has(t.id)) {
+  // chi tiêu được tính dần theo từng kỳ trả góp.
+  if (INSTALLMENT_CONVERT.test(d) || ctx.installmentPairs.has(t.id)) {
     return { kind: 'transfer', category: '', note: 'Đã chuyển sang trả góp, tính theo từng kỳ' };
   }
-  if (/tra gop hang ky|installment repayment/.test(d)) return { kind: 'expense', category: 'Trả góp' };
-  if (/phi tra gop/.test(d)) return { kind: 'expense', category: 'Phí & lãi ngân hàng' };
+  if (/tra gop hang ky|installment repayment|gd goc tra gop|tra gop ky han \d+\/\d+/.test(d)) return { kind: 'expense', category: 'Trả góp' };
+  if (/phi (chuyen doi )?tra gop/.test(d)) return { kind: 'expense', category: 'Phí & lãi ngân hàng' };
 
   // Lãi tiền gửi / sinh lời: thu nhập.
   if (t.amount > 0 && /tra lai so du|tra lai tien gui|loi nhuan sinh loi|lai tien gui|\binterest\b/.test(d)) {
@@ -129,6 +153,8 @@ function automatic(t) {
   }
   const k = keywordCategory(t);
   if (k) return { kind: 'expense', category: k };
+  const m = mccCategory(t.mcc);
+  if (m) return { kind: 'expense', category: m };
   const p = norm(t.counterparty);
   if (p && !COMPANY.test(p) && /chuyen/.test(d)) return { kind: 'expense', category: 'Chuyển khoản cá nhân' };
   return { kind: 'expense', category: UNCATEGORIZED };
@@ -142,7 +168,7 @@ export function buildContext(data) {
   const installmentPairs = new Set();
   const txs = Object.values(data.transactions);
   for (const c of txs) {
-    if (!(c.amount > 0 && /chuyen sang tra gop|debt transfer to installment/.test(norm(c.description)))) continue;
+    if (!(c.amount > 0 && INSTALLMENT_CONVERT.test(norm(c.description)))) continue;
     const buy = txs
       .filter((t) => t.account === c.account && Math.abs(t.amount + c.amount) < 1 && t.date <= c.date
         && (Date.parse(c.date) - Date.parse(t.date)) / 864e5 <= 45 && !installmentPairs.has(t.id))

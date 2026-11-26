@@ -2,9 +2,10 @@
 import { norm, hash } from '../util.js';
 import * as tcbCredit from './techcombank-credit.js';
 import * as tcbAccount from './techcombank-account.js';
+import * as vibCredit from './vib-credit.js';
 
 // Thêm ngân hàng mới: viết module có detect(text) + parse(pages) rồi thêm vào đây.
-const PDF_PARSERS = [tcbCredit, tcbAccount];
+const PDF_PARSERS = [tcbCredit, tcbAccount, vibCredit];
 
 /**
  * Kết quả: { bank, accountType: 'bank'|'credit'|'wallet'|'unknown', accountTypeLabel, accountNo, holder,
@@ -21,7 +22,7 @@ export async function parseFile(file, { askPassword }) {
     const text = norm(pages.map((p) => p.items.map((i) => i.s).join(' ')).join(' '));
     if (!text) throw new Error('PDF không có lớp chữ (có thể là ảnh scan). Hãy tải bản PDF gốc từ ngân hàng.');
     const parser = PDF_PARSERS.find((p) => p.detect(text));
-    if (!parser) throw new Error('Chưa hỗ trợ mẫu sao kê PDF này. Hiện đọc được: Techcombank (thẻ tín dụng, tài khoản thanh toán).');
+    if (!parser) throw new Error('Chưa hỗ trợ mẫu sao kê PDF này. Hiện đọc được: Techcombank (thẻ tín dụng, tài khoản thanh toán), VIB (thẻ tín dụng).');
     return finalize(parser.parse(pages), file);
   }
 

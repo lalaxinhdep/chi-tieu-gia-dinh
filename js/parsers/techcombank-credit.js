@@ -1,6 +1,6 @@
 // Techcombank — "Sao kê tài khoản thẻ tín dụng" (PDF hằng tháng).
 // Mục A: Ngày GD | Ngày cập nhật hệ thống | Số tiền gốc | Ghi nợ | Ghi có | Diễn giải
-import { parseMoney, parseDate, isDateStr, sumCheck } from '../util.js';
+import { parseMoney, parseDate, isDateStr, sumCheck, fmtMoney, norm } from '../util.js';
 import { lineAt, findItem, joinCell, lastMoney, valueRightOf, groupByAnchors } from './pdf-layout.js';
 
 export const id = 'tcb-credit';
@@ -12,6 +12,40 @@ export function detect(text) {
 const COLS = [/^ngay giao dich/, /^ngay cap nhat he thong/, /^so tien giao dich goc/, /^ghi no/, /^ghi co/, /^dien giai/];
 const C = { txDate: 0, postDate: 1, orig: 2, debit: 3, credit: 4, desc: 5 };
 const MAX_DIST = 22;
+
+/**
+ * Mục B: mỗi khoản trả góp có Số tiền chuyển trả góp | Số tiền trả góp trong kỳ (âm) | … | Diễn giải
+ * ("THEGIOIDIDONG.COM_13 (kỳ trả thứ 9/12)", có thể xuống dòng).
+ */
+function installmentPlans(pages) {
+  const plans = [];
+  let started = false;
+  for (const page of pages) {
+    const items = page.items;
+    const sec = findItem(items, /^b\. thong tin tra gop/);
+    if (!started && !sec) continue;
+    started = true;
+    const hPay = findItem(items, /^so tien tra gop$/, sec ? sec.y : -Infinity);
+    const hAmt = findItem(items, /^so tien chuyen$/, sec ? sec.y : -Infinity);
+    const hDesc = findItem(items, /^dien giai$/, sec ? sec.y : -Infinity);
+    if (!hPay || !hDesc) continue;
+    const rows = items.filter((i) => i.y > hPay.y + 20 && Math.abs(i.x - hPay.x) < 40 && (parseMoney(i.s) ?? 0) < 0);
+    for (const r of rows) {
+      const near = items.filter((i) => Math.abs(i.y - r.y) <= 14 && i.x >= hDesc.x - 4);
+      const desc = near.sort((a, b) => a.y - b.y || a.x - b.x).map((i) => i.s).join(' ').replace(/\s+/g, ' ').trim();
+      const term = norm(desc).match(/ky tra thu\s*(\d+\s*\/\s*\d+)/)?.[1].replace(/\s/g, '');
+      if (!term) continue;
+      const amt = hAmt && items.find((i) => Math.abs(i.y - r.y) <= 3 && Math.abs(i.x - hAmt.x) < 40);
+      plans.push({
+        payment: Math.abs(parseMoney(r.s)),
+        total: amt ? parseMoney(amt.s) : null,
+        term,
+        item: desc.replace(/\s*\(\s*k[ỳy] tr[ảa].*$/i, '').trim(),
+      });
+    }
+  }
+  return plans;
+}
 
 export function parse(pages) {
   const first = pages[0].items;
@@ -98,6 +132,17 @@ export function parse(pages) {
   }
 
   if (!starts) throw new Error('Không tìm thấy mục "Thông tin chi tiết" trong sao kê thẻ Techcombank.');
+
+  // Ghi rõ từng kỳ trả góp: món nào, kỳ thứ mấy, theo mục "B. Thông tin trả góp".
+  const plans = installmentPlans(pages);
+  for (const t of txs) {
+    if (!/tra gop hang ky|installment repayment/i.test(norm(t.description))) continue;
+    const p = plans.find((x) => !x.used && Math.abs(x.payment - t.debit) < 1);
+    if (!p) continue;
+    p.used = true;
+    t.installment = { term: p.term, item: p.item, total: p.total };
+    t.merchant = `Trả góp kỳ ${p.term} · ${p.item}${p.total ? ` (khoản ${fmtMoney(p.total)} đ)` : ''}`;
+  }
 
   const checks = [];
   sumCheck(checks, 'Tổng ghi nợ trong kỳ', txs, 'debit', totalDebit);
