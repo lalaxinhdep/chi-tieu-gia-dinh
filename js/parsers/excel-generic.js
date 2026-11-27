@@ -40,7 +40,11 @@ export async function parseExcel(buf, fileName, askPassword) {
   if (isEncryptedOffice(bytes, XLSX.CFB)) {
     for (let retry = false; ; retry = true) {
       const pw = askPassword ? await askPassword(retry) : null;
-      if (!pw) throw new Error('File có mật khẩu: cần nhập mật khẩu để mở.');
+      if (!pw) {
+        throw new Error(retry
+          ? 'Mật khẩu chưa đúng nên chưa mở được file. Hãy chọn lại file và nhập đúng mật khẩu (phân biệt chữ hoa, chữ thường).'
+          : 'Đã bỏ qua file vì chưa nhập mật khẩu. Chọn lại file, nhập mật khẩu rồi bấm Mở hoặc Enter.');
+      }
       const plain = await decryptOffice(bytes, pw, XLSX.CFB);
       if (plain) { bytes = plain; break; }
     }

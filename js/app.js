@@ -43,6 +43,11 @@ function askSecret(title, msg, okLabel = 'Mở') {
   });
 }
 
+// Enter trong ô mật khẩu = Mở (nếu không, form bấm nút đầu tiên là "Hủy" và mật khẩu bị bỏ).
+$('#pwDialog').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && e.target.matches('#pwInput')) { e.preventDefault(); $('#pwDialog').close('ok'); }
+});
+
 function confirmBox(title, msg, okLabel = 'Đồng ý') {
   const dlg = $('#confirmDialog');
   $('#cfTitle').textContent = title;
