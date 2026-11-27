@@ -29,7 +29,7 @@ export async function parseFile(file, { askPassword }) {
   const ext = file.name.split('.').pop().toLowerCase();
   if (['xlsx', 'xls', 'xlsm', 'csv'].includes(ext)) {
     const { parseExcel } = await import('./excel-generic.js');
-    return finalize(await parseExcel(buf, file.name), file);
+    return finalize(await parseExcel(buf, file.name, askPassword), file);
   }
   throw new Error('Định dạng chưa hỗ trợ. Hãy dùng PDF, Excel (.xlsx, .xls) hoặc CSV.');
 }

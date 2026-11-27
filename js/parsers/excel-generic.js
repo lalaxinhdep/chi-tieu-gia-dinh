@@ -32,12 +32,23 @@ function assignRoles(row) {
   return roles;
 }
 
-export async function parseExcel(buf, fileName) {
+export async function parseExcel(buf, fileName, askPassword) {
   const XLSX = await import(SHEETJS);
+  let bytes = new Uint8Array(buf);
+  // File có mật khẩu: hỏi mật khẩu rồi giải mã ngay trên máy (mật khẩu không được lưu).
+  const { isEncryptedOffice, decryptOffice } = await import('./office-crypto.js');
+  if (isEncryptedOffice(bytes, XLSX.CFB)) {
+    for (let retry = false; ; retry = true) {
+      const pw = askPassword ? await askPassword(retry) : null;
+      if (!pw) throw new Error('File có mật khẩu: cần nhập mật khẩu để mở.');
+      const plain = await decryptOffice(bytes, pw, XLSX.CFB);
+      if (plain) { bytes = plain; break; }
+    }
+  }
   // CSV: tự giải mã UTF-8 (tiêu đề tiếng Việt) và giữ nguyên chữ để không bị hiểu ngày dd/mm thành mm/dd.
   const wb = /\.csv$/i.test(fileName)
-    ? XLSX.read(new TextDecoder('utf-8').decode(buf).replace(/^﻿/, ''), { type: 'string', raw: true })
-    : XLSX.read(new Uint8Array(buf), { type: 'array', cellDates: true });
+    ? XLSX.read(new TextDecoder('utf-8').decode(bytes).replace(/^﻿/, ''), { type: 'string', raw: true })
+    : XLSX.read(bytes, { type: 'array', cellDates: true });
   const warnings = [];
 
   for (const sheetName of wb.SheetNames) {

@@ -693,6 +693,14 @@ async function handleFiles(files) {
           (retry ? 'Mật khẩu chưa đúng. ' : '') + `Nhập mật khẩu để mở "${f.name}". Mật khẩu chỉ dùng để mở file trên máy này và không được lưu lại.`),
       });
       if (!store.isUnlocked()) return;
+      // Bảng tính đọc theo cột chung được lưu thành tài khoản riêng: cảnh báo nếu trùng sao kê PDF đã nhập.
+      if (r.parser === 'excel-generic') {
+        const have = new Set(txs.map((t) => `${t.date}|${Math.round(t.amount)}`));
+        const same = r.transactions.filter((t) => have.has(`${t.date}|${Math.round(t.amount)}`)).length;
+        if (same >= Math.max(2, r.transactions.length * 0.5)) {
+          r.warnings.push(`${same}/${r.transactions.length} giao dịch trùng ngày và số tiền với giao dịch đã có (có thể bạn đã nhập bản PDF của cùng sao kê). Nếu vậy hãy bấm Xóa file này ở mục "File đã nhập" để không bị tính hai lần.`);
+        }
+      }
       r.saved = await store.importResult(r);
     } catch (e) {
       console.error(e);

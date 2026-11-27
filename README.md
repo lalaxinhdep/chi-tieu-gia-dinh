@@ -12,7 +12,8 @@ Web app (PWA) quản lý chi tiêu từ file sao kê ngân hàng/ví. File đư�
   - Ảnh chụp màn hình (`js/ocr.js`, `js/parsers/image.js`): đọc chữ ngay trên máy bằng Tesseract (WebAssembly). Mô hình tiếng Việt đọc chữ, mô hình tiếng Anh đọc số vì mô hình tiếng Việt hay nhầm 3 thành 5.
     - Ảnh lịch sử giao dịch: hiện bảng để soát ngày, nội dung, số tiền, chiều tiền rồi mới lưu. Dòng trùng ngày và số tiền với giao dịch đã có thì tự bỏ chọn.
     - Ảnh thông tin khoản vay: mở form khoản vay đã điền sẵn.
-  - PDF có mật khẩu: app hỏi mật khẩu để mở và không lưu lại. Nhập lại file cũ thì giao dịch trùng tự bỏ qua.
+  - PDF và Excel có mật khẩu: app hỏi mật khẩu để mở và không lưu lại. Excel được giải mã ngay trên máy bằng Web Crypto (`js/parsers/office-crypto.js`), chỉ đọc được mật khẩu kiểu Excel 2010 trở lên.
+  - Excel đọc theo cột chung nên được lưu thành tài khoản riêng. App cảnh báo nếu phần lớn giao dịch trùng ngày và số tiền với giao dịch đã có, ví dụ khi đã nhập bản PDF của cùng sao kê. Nhập lại file cũ thì giao dịch trùng tự bỏ qua.
 - [x] **Lưu mã hóa trên máy**: IndexedDB, AES-GCM 256, khóa sinh từ mật khẩu bằng PBKDF2-SHA256 (600.000 vòng). Tự khóa khi rời app quá 5 phút.
 - [x] **Phân loại bằng quy tắc** (`js/classify.js`). Thứ tự ưu tiên: sửa tay từng dòng > quy tắc đã học > quy tắc cấu trúc > từ khóa > mặc định.
   - Không tính: trả nợ thẻ tín dụng (cả hai phía), chuyển giữa tài khoản của thành viên gia đình, gửi/rút tiết kiệm, món mua đã chuyển sang trả góp (tính theo từng kỳ trả góp).
