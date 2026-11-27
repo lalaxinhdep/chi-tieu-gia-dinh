@@ -21,6 +21,11 @@ Web app (PWA) quản lý chi tiêu từ file sao kê ngân hàng/ví. File đư�
   - Theo đối tác: chuyển cho ai, nhận từ ai, mua ở đâu, bao nhiêu lần, bao nhiêu tiền. Tên người gửi được tách từ nội dung chuyển khoản.
   - Theo tài khoản của tôi: chi và thu trên từng tài khoản, thẻ.
   - Tiết kiệm: nhập số dư đầu kỳ, app cộng tiền gửi, trừ tiền rút để ra số dư từng tháng.
+- [x] **Thẻ tín dụng** (`js/cards.js`, tab "Thẻ & vay"): theo sao kê mới nhất của từng thẻ.
+  - Hạn thanh toán, số phải trả (dư nợ cuối kỳ), số tối thiểu, tổng phải trả của mọi thẻ.
+  - Từng khoản trả góp: món, kỳ thứ mấy, mỗi kỳ bao nhiêu, còn bao nhiêu kỳ và bao nhiêu tiền, trả đến tháng nào.
+  - Bảng trả góp các tháng tới cho từng thẻ, chưa gồm chi tiêu mới.
+  - Sao kê nhập trước bản này cần nhập lại để app đọc thêm các thông tin trên.
 - [x] **Khoản vay** (`js/loans.js`, `js/loans-ui.js`): nhiều khoản, mọi trường đều sửa tay được, để trống nếu chưa biết.
   - Lịch trả nợ dự kiến: gốc đều hoặc trả đều, tự đổi sang lãi thả nổi từ ngày hết cố định.
   - Thử trả trước: tính tiền lãi tiết kiệm được, có trừ phí trả trước nếu đã nhập phí.

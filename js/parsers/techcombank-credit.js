@@ -28,6 +28,9 @@ function installmentPlans(pages) {
     const hPay = findItem(items, /^so tien tra gop$/, sec ? sec.y : -Infinity);
     const hAmt = findItem(items, /^so tien chuyen$/, sec ? sec.y : -Infinity);
     const hDesc = findItem(items, /^dien giai$/, sec ? sec.y : -Infinity);
+    const hRemain = findItem(items, /^so ky tra gop/, sec ? sec.y : -Infinity);
+    const hLeft = findItem(items, /^so tien tra gop con/, sec ? sec.y : -Infinity);
+    const hConv = findItem(items, /^ngay chuyen/, sec ? sec.y : -Infinity);
     if (!hPay || !hDesc) continue;
     const rows = items.filter((i) => i.y > hPay.y + 20 && Math.abs(i.x - hPay.x) < 40 && (parseMoney(i.s) ?? 0) < 0);
     for (const r of rows) {
@@ -35,11 +38,16 @@ function installmentPlans(pages) {
       const desc = near.sort((a, b) => a.y - b.y || a.x - b.x).map((i) => i.s).join(' ').replace(/\s+/g, ' ').trim();
       const term = norm(desc).match(/ky tra thu\s*(\d+\s*\/\s*\d+)/)?.[1].replace(/\s/g, '');
       if (!term) continue;
-      const amt = hAmt && items.find((i) => Math.abs(i.y - r.y) <= 3 && Math.abs(i.x - hAmt.x) < 40);
+      const cell = (h) => h && items.find((i) => Math.abs(i.y - r.y) <= 3 && Math.abs(i.x - h.x) < 40);
+      const amt = cell(hAmt), remain = cell(hRemain), left = cell(hLeft), conv = cell(hConv);
+      const [paid, periods] = term.split('/').map(Number);
       plans.push({
         payment: Math.abs(parseMoney(r.s)),
         total: amt ? parseMoney(amt.s) : null,
-        term,
+        term, paid, periods,
+        remaining: remain && /^\d+$/.test(remain.s.trim()) ? +remain.s.trim() : periods - paid,
+        outstanding: left ? parseMoney(left.s) : null,
+        convDate: conv ? parseDate(conv.s) : null,
         item: desc.replace(/\s*\(\s*k[ỳy] tr[ảa].*$/i, '').trim(),
       });
     }
@@ -148,6 +156,30 @@ export function parse(pages) {
   sumCheck(checks, 'Tổng ghi nợ trong kỳ', txs, 'debit', totalDebit);
   sumCheck(checks, 'Tổng ghi có trong kỳ', txs, 'credit', totalCredit);
 
+  // Mục 1 (trang đầu): Dư nợ kỳ trước | Tổng ghi nợ | Tổng ghi có | Dư nợ cuối kỳ | Mức trả tối thiểu | Thời hạn thanh toán.
+  // Dư nợ in số âm khi đang nợ.
+  const statement = { date: statementDate, dueDate: null, balance: null, minDue: null, installments: plans.map(({ used, ...p }) => p) };
+  const dueLabel = findItem(first, /^payment due date/);
+  const dueItem = dueLabel && first.find((i) => i.y > dueLabel.y + 4 && i.y < dueLabel.y + 60 && /\d{2}\/\d{2}\/\d{4}/.test(i.s));
+  if (dueItem) {
+    statement.dueDate = parseDate(dueItem.s.match(/\d{2}\/\d{2}\/\d{4}/)[0]);
+    const nums = lineAt(first, dueItem.y, 4).filter((i) => i !== dueItem).map((i) => parseMoney(i.s)).filter((v) => v != null);
+    if (nums.length >= 5) {
+      statement.balance = Math.max(0, -nums[3]);
+      statement.minDue = Math.abs(nums[4]);
+    }
+  }
+  // Mục 2: Tổng giá trị khoản trả góp còn hiệu lực — đối chiếu với tổng các khoản ở mục B.
+  const instLabel = findItem(first, /^total outstanding installment balance/);
+  if (instLabel && plans.length) {
+    const below = first.filter((i) => i.y > instLabel.y + 4 && i.y < instLabel.y + 40).sort((a, b) => a.y - b.y || a.x - b.x);
+    const v = lastMoney(below);
+    if (v != null) {
+      const sum = plans.reduce((s, p) => s + (p.outstanding || 0), 0);
+      checks.push({ ok: Math.abs(sum - v) < plans.length + 1, label: 'Tổng trả góp còn lại', expected: v, actual: sum });
+    }
+  }
+
   return {
     parser: id,
     bank: 'Techcombank',
@@ -158,6 +190,7 @@ export function parse(pages) {
     holder,
     period: { from: null, to: statementDate },
     transactions: txs,
+    statement,
     checks, warnings,
   };
 }

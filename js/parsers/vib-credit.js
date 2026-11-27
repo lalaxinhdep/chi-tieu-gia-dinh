@@ -124,6 +124,23 @@ export function parse(pages) {
   sumCheck(checks, 'Phát sinh nợ trong kỳ', txs, 'debit', totalDebit);
   sumCheck(checks, 'Phát sinh có trong kỳ', txs, 'credit', totalCredit);
 
+  // Tóm tắt sao kê (trang đầu) và các khoản trả góp đang trả (mỗi kỳ là một dòng "GD GOC TRA GOP KY HAN i/N").
+  const balance = parseMoney(valueRightOf(first, /^du no cuoi ky/));
+  const statement = {
+    date: statementDate,
+    dueDate: parseDate(valueRightOf(first, /^ngay den han thanh toan/)),
+    balance: balance == null ? null : Math.max(0, balance),
+    minDue: parseMoney(valueRightOf(first, /^thanh toan toi thieu/)),
+    autoDebit: valueRightOf(first, /^phuong thuc thanh toan/), // vd. "Thu Nợ Tối Thiểu": tự trích tài khoản số tối thiểu
+    installments: txs.filter((t) => t.installment).map((t) => {
+      const [paid, periods] = t.installment.term.split('/').map(Number);
+      return {
+        payment: t.debit, total: Math.round(t.debit * periods), term: t.installment.term, paid, periods,
+        remaining: periods - paid, outstanding: Math.round(t.debit * (periods - paid)), convDate: null, item: '', card: t.card,
+      };
+    }),
+  };
+
   return {
     parser: id,
     bank: 'VIB',
@@ -134,6 +151,7 @@ export function parse(pages) {
     holder,
     period: { from: null, to: statementDate },
     transactions: txs,
+    statement,
     checks, warnings,
   };
 }

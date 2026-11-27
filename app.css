@@ -300,3 +300,20 @@ dialog.xwide { width: min(96vw, 720px); max-height: 92dvh; padding-bottom: 0; }
   .review-table td:nth-child(1) { grid-row: span 2; }
   .review-table td:nth-child(3) { grid-column: 2 / -1; grid-row: 2; }
 }
+/* Thẻ tín dụng */
+.sec-title { margin: 6px 0 10px; }
+#cardsBody:not(:empty) + #loansBody { margin-top: 24px; }
+.due-list { margin: 4px 0 8px; padding-left: 18px; display: grid; gap: 4px; }
+.tx.inst td:first-child { min-width: 160px; }
+@media (max-width: 640px) {
+  /* Lịch trả nợ, trả góp: giữ dạng bảng, cuộn ngang nếu rộng. */
+  .tx.sched thead { display: table-header-group; }
+  .tx.sched tr { display: table-row; padding: 0; }
+  .tx.sched td { display: table-cell; border-bottom: 1px solid var(--line); padding: 5px 4px; font-size: 12px; }
+  .tx.sched td.date { grid-column: auto; }
+  .tx.sched th { font-size: 11px; padding: 5px 4px; }
+  .tx.inst td:first-child { min-width: 120px; }
+}
+/* Cột lưới không được nở theo bảng rộng: bảng tự cuộn ngang trong khung của nó. */
+main, section[data-view] { grid-template-columns: minmax(0, 1fr); }
+.inst-left { font-size: 12px; color: var(--warn); margin: 2px 0; }

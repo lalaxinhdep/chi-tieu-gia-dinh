@@ -3,6 +3,7 @@ import { parseFile, finalize } from './parsers/index.js';
 import * as store from './store.js';
 import { initLoans, bindLoanEvents, renderLoans, loansOverviewCard, loanFromImage } from './loans-ui.js';
 import { readImage, releaseOcr } from './ocr.js';
+import { renderCards, cardsOverviewCard } from './cards.js';
 import { loanFromRows, txsFromRows } from './parsers/image.js';
 import { classifyAll, categoryLists, EXPENSE_CATS, INCOME_CATS, KINDS, isCounted, UNCATEGORIZED } from './classify.js';
 import { summarize, byMonth, monthsAvailable, byParty, byAccount, savingsReport } from './reports.js';
@@ -134,7 +135,7 @@ function doLock() {
   txs = [];
   session = { results: [], pending: [], reviews: [] };
   partyFilter = null; partyAll = false; partyExpanded = false;
-  for (const id of ['#ovBody', '#txList', '#files', '#history', '#accounts', '#rules', '#cats', '#loansBody']) $(id).innerHTML = '';
+  for (const id of ['#ovBody', '#txList', '#files', '#history', '#accounts', '#rules', '#cats', '#loansBody', '#cardsBody']) $(id).innerHTML = '';
   for (const d of ['#loanDialog', '#payDialog', '#txDialog']) if ($(d).open) $(d).close('cancel');
   releaseOcr();
   delete $('#ovMonth').dataset.init;
@@ -169,7 +170,7 @@ function render() {
   if (!store.isUnlocked()) return;
   if (view === 'overview') renderOverview();
   else if (view === 'tx') renderTx();
-  else if (view === 'loans') renderLoans();
+  else if (view === 'loans') { renderCards(txs, accLabel); renderLoans(); }
   else if (view === 'import') renderImport();
   else if (view === 'settings') renderSettings();
 }
@@ -242,6 +243,7 @@ function renderOverview() {
     ${partyCard(month)}
     ${accountCard(month)}
     ${savingsCard(month)}
+    ${cardsOverviewCard(txs, accLabel)}
     ${loansOverviewCard()}
     <div class="card chart">
       <h2>Thu và chi theo tháng</h2>

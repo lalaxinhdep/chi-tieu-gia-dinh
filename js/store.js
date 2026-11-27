@@ -120,6 +120,7 @@ export async function importResult(r) {
     id: fileId, name: r.fileName, size: r.fileSize, importedAt: new Date().toISOString(),
     account: accKey, period: r.period, count: r.transactions.length, added, dup,
     checksOk: r.checks.every((c) => c.ok !== false),
+    ...(r.statement && { statement: r.statement }), // thẻ tín dụng: hạn thanh toán, số phải trả, trả góp
   });
   await save();
   return { added, dup };
