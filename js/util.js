@@ -61,6 +61,16 @@ export const fmtSigned = (n) => (n > 0 ? '+' : n < 0 ? '−' : '') + nf.format(M
 export const fmtDate = (iso) => (iso ? iso.split('-').reverse().join('/') : '');
 export const maskAccount = (no) => (no ? '••••' + String(no).replace(/\D/g, '').slice(-4) : '');
 
+/**
+ * Che số thẻ / số tài khoản khi hiển thị: "4220...4702", "513892xxxxxx9887", "513892******9887",
+ * dãy từ 9 chữ số trở lên. Chỉ đổi chữ hiển thị, dữ liệu gốc (đã mã hóa) giữ nguyên để tìm kiếm, chống trùng.
+ */
+export function hideNumbers(s) {
+  return String(s ?? '')
+    .replace(/\b\d{4,6}\s?(?:\.{2,3}|…|[x*]{3,10})\s?\d{4}\b/gi, '••••')
+    .replace(/(?<![A-Za-z\d])\d{9,}(?!\d)/g, '••••');
+}
+
 /** Thoát HTML để chèn chuỗi vào giao diện an toàn. */
 export function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));

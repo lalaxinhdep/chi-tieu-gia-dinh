@@ -1,6 +1,6 @@
 // Service worker: cho app mở được khi không có mạng và cài được như app trên điện thoại.
 // Không bao giờ gửi dữ liệu đi; chỉ lưu đệm mã của app và các thư viện đã ghim phiên bản.
-const VERSION = 'ctgd-v7';
+const VERSION = 'ctgd-v8';
 const SHELL = [
   './', 'index.html', 'app.css', 'manifest.webmanifest',
   'js/app.js', 'js/util.js', 'js/crypto.js', 'js/idb.js', 'js/store.js', 'js/classify.js', 'js/reports.js',

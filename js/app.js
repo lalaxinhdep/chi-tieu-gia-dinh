@@ -7,7 +7,7 @@ import { renderCards, cardsOverviewCard } from './cards.js';
 import { loanFromRows, txsFromRows } from './parsers/image.js';
 import { classifyAll, categoryLists, EXPENSE_CATS, INCOME_CATS, KINDS, isCounted, UNCATEGORIZED } from './classify.js';
 import { summarize, byMonth, monthsAvailable, byParty, byAccount, savingsReport } from './reports.js';
-import { esc, fmtMoney, fmtSigned, fmtDate, maskAccount, norm, parseMoney } from './util.js';
+import { esc, fmtMoney, fmtSigned, fmtDate, hideNumbers, norm, parseMoney } from './util.js';
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
@@ -284,7 +284,7 @@ function partyCard(month) {
   const list = partyExpanded ? rows : rows.slice(0, PARTY_TOP);
   const cell = (v, n, cls) => (n ? `<td class="amt ${cls}">${fmtMoney(v)}<div class="detail">${lots(n)}</div></td>` : '<td class="amt detail">—</td>');
   const body = list.map((r) => `<tr class="clickable" data-party="${esc(r.key)}" data-name="${esc(r.name)}">
-      <td><div class="main">${esc(r.name)}</div>${r.bank ? `<div class="detail">${esc(shortBank(r.bank))}</div>` : ''}</td>
+      <td><div class="main">${esc(hideNumbers(r.name))}</div>${r.bank ? `<div class="detail">${esc(shortBank(r.bank))}</div>` : ''}</td>
       ${cell(r.out, r.outCount, 'out')}${cell(r.in, r.inCount, 'in')}
     </tr>`).join('');
   return `<div class="card">
@@ -508,11 +508,11 @@ function renderTx() {
 
   let out = 0, outN = 0, inc = 0, incN = 0;
   for (const t of list) { if (t.amount < 0) { out -= t.amount; outN++; } else { inc += t.amount; incN++; } }
-  const party = partyFilter ? `<span class="chip filter">Đối tác: ${esc(partyFilter.name)} <button type="button" data-clearparty aria-label="Bỏ lọc đối tác">✕</button></span> ` : '';
+  const party = partyFilter ? `<span class="chip filter">Đối tác: ${esc(hideNumbers(partyFilter.name))} <button type="button" data-clearparty aria-label="Bỏ lọc đối tác">✕</button></span> ` : '';
   $('#txSummary').innerHTML = `${party}${list.length} giao dịch · Tiền ra <b class="out">${fmtMoney(out)} đ</b> (${lots(outN)}) · Tiền vào <b class="in">${fmtMoney(inc)} đ</b> (${lots(incN)})`;
   const body = list.slice(0, shown).map((t) => {
-    const main = t.party || t.merchant || t.counterparty || t.description;
-    const detail = t.description && t.description !== main ? t.description : '';
+    const main = hideNumbers(t.party || t.merchant || t.counterparty || t.description);
+    const detail = t.description && hideNumbers(t.description) !== main ? hideNumbers(t.description) : '';
     const counted = isCounted(t.kind);
     const chip = counted
       ? `<span class="chip ${t.category === UNCATEGORIZED ? 'unc' : ''}">${esc(t.category)}${t.source === 'manual' || t.source === 'rule' ? ' ✎' : ''}</span>`
@@ -548,8 +548,8 @@ function editTx(id) {
   const t = txs.find((x) => x.id === id);
   if (!t) return;
   const dlg = $('#txDialog');
-  $('#txdTitle').textContent = `${fmtSigned(t.amount)} đ · ${t.merchant || t.counterparty || ''}`.trim();
-  $('#txdInfo').textContent = `${fmtDate(t.date)} · ${accLabel(t.account)}\n${t.description}`;
+  $('#txdTitle').textContent = hideNumbers(`${fmtSigned(t.amount)} đ · ${t.merchant || t.counterparty || ''}`.trim());
+  $('#txdInfo').textContent = `${fmtDate(t.date)} · ${accLabel(t.account)}\n${hideNumbers(t.description)}`;
   $('#txdKind').innerHTML = Object.entries(KINDS).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join('');
   $('#txdKind').value = t.kind;
   $('#txdNote').value = t.source === 'manual' ? t.note || '' : '';
@@ -562,7 +562,7 @@ function editTx(id) {
     .sort((a, b) => (b.key === t.key) - (a.key === t.key)
       || Math.abs(Date.parse(a.date) - Date.parse(t.date)) - Math.abs(Date.parse(b.date) - Date.parse(t.date)))[0];
   $('#txdPairText').textContent = pair
-    ? `Loại luôn khoản ngược chiều: ${fmtDate(pair.date)} · ${fmtSigned(pair.amount)} đ · ${pair.merchant || pair.counterparty || pair.description}`
+    ? `Loại luôn khoản ngược chiều: ${fmtDate(pair.date)} · ${fmtSigned(pair.amount)} đ · ${hideNumbers(pair.merchant || pair.counterparty || pair.description)}`
     : '';
 
   const similar = txs.filter((x) => x.key === t.key).length;
@@ -747,11 +747,10 @@ function renderImport() {
       return `<article class="card file"><div class="file-head"><span class="file-name">${esc(r.fileName)}</span><span class="tag">Ảnh</span></div><p class="small">${esc(r.info)}</p></article>`;
     }
     const label = [r.bank, r.accountTypeLabel].filter(Boolean).join(' · ');
-    const cardsTxt = r.cards?.length ? ` (thẻ ${r.cards.map((c) => '••' + c).join(', ')})` : '';
     return `<article class="card file">
       <div class="file-head"><span class="file-name">${esc(r.fileName)}</span><span class="tag">${esc(label)}</span></div>
       <dl class="stats">
-        <div><dt>Tài khoản</dt><dd>${esc((r.accountNo ? maskAccount(r.accountNo) : '') + cardsTxt) || '—'}</dd></div>
+        <div><dt>Tài khoản</dt><dd>${esc(accLabel(r.saved.account)) || '—'}</dd></div>
         <div><dt>Kỳ sao kê</dt><dd>${esc(fmtDate(r.period.from))} – ${esc(fmtDate(r.period.to))}</dd></div>
         <div><dt>Đã lưu</dt><dd>${r.saved.added} mới${r.saved.dup ? ` · ${r.saved.dup} đã có (cập nhật lại)` : ''}</dd></div>
         <div><dt>Tiền vào (thô)</dt><dd class="in">+${fmtMoney(r.inflow)}</dd></div>
@@ -844,7 +843,7 @@ function renderSettings() {
   $('#family').value = d.family.join('\n');
   const accs = Object.values(d.accounts);
   $('#accounts').innerHTML = accs.length ? accs.map((a) => `<div class="list-row">
-      <div class="detail" style="min-width:120px">${esc([a.bank, a.typeLabel].filter(Boolean).join(' · '))}<br>${esc(maskAccount(a.accountNo))}</div>
+      <div class="detail" style="min-width:120px">${esc([a.bank, a.typeLabel].filter(Boolean).join(' · '))}</div>
       <input data-acc="${esc(a.key)}" value="${esc(a.name)}" placeholder="${esc(store.accountLabel({ ...a, name: '' }))}" aria-label="Tên tài khoản">
     </div>`).join('') : '<p class="empty">Chưa có tài khoản nào.</p>';
   const rules = d.rules.slice().reverse();

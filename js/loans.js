@@ -171,4 +171,4 @@ export function parseField(f, raw) {
 }
 
 /** Tên hiển thị của khoản vay. */
-export const loanTitle = (l) => l.name || [l.bank, l.product].filter(Boolean).join(' · ') || (l.accountNo ? `Khoản vay ${l.accountNo}` : 'Khoản vay');
+export const loanTitle = (l) => l.name || [l.bank, l.product].filter(Boolean).join(' · ') || 'Khoản vay';

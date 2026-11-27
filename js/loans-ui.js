@@ -1,7 +1,7 @@
 // Giao diện mục Khoản vay: danh sách, form thông tin, lịch trả dự kiến, thử trả trước, lịch sử trả nợ.
 import * as store from './store.js';
 import { LOAN_FIELDS, METHODS, emptyLoan, derived, schedule, prepay, matchTxs, parseField, loanTitle, today, daysBetween, addMonths } from './loans.js';
-import { esc, fmtMoney, fmtDate } from './util.js';
+import { esc, fmtMoney, fmtDate, hideNumbers } from './util.js';
 
 const $ = (s) => document.querySelector(s);
 let ctx = null; // { getTxs, toast, confirmBox, refresh }
@@ -96,7 +96,7 @@ function loanCard(l) {
   const paidPct = l.disbursed && d.paidPrincipal != null ? Math.min(100, Math.max(0, (d.paidPrincipal / l.disbursed) * 100)) : null;
   const rateLabel = d.currentRate == null ? '—'
     : `${pct(d.currentRate)} ${d.floating ? 'thả nổi' : d.floatStart ? `cố định đến ${fmtDate(d.floatStart)}` : ''}`;
-  const sub = [l.bank, l.product, l.accountNo && `TK ${l.accountNo}`].filter(Boolean).join(' · ');
+  const sub = [l.bank, l.product].filter(Boolean).join(' · ');
   const remain = sch ? sch.rows.length : d.dates.length || null;
   return `<article class="card loan" data-loan="${esc(l.id)}">
     <div class="file-head"><div><div class="file-name">${esc(loanTitle(l))}</div>${sub && sub !== loanTitle(l) ? `<div class="detail small muted">${esc(sub)}</div>` : ''}</div>
@@ -159,7 +159,7 @@ function paymentsBlock(l) {
       <div class="detail">${[p.principal ? `gốc ${fmtMoney(p.principal)}` : '', p.interest ? `lãi ${fmtMoney(p.interest)}` : '', p.note, p.txId ? 'từ sao kê' : ''].filter(Boolean).map(esc).join(' · ')}</div></div>
       <button class="btn small" type="button" data-paydel="${esc(p.id)}">Xóa</button></div>`).join('');
   const candRows = cands.map((t) => `<div class="list-row"><div><div>${fmtDate(t.date)} · <b class="out">${fmtMoney(-t.amount)} đ</b></div>
-      <div class="detail">${esc(t.description)}</div></div>
+      <div class="detail">${esc(hideNumbers(t.description))}</div></div>
       <button class="btn small" type="button" data-paytx="${esc(t.id)}">Ghi nhận</button></div>`).join('');
   const sum = pays.reduce((s, p) => s + (p.amount || 0), 0);
   return `<details class="loan-sec"><summary>Lịch sử trả nợ (${pays.length} lần${pays.length ? `, ${fmtMoney(sum)} đ` : ''})${cands.length ? ` · ${cands.length} giao dịch chờ ghi nhận` : ''}</summary>
@@ -254,7 +254,7 @@ function openPayment(l, tx = null) {
   f.amount.value = amount != null ? fmtMoney(amount) : '';
   f.principal.value = principal != null ? fmtMoney(principal) : '';
   f.interest.value = interest != null ? fmtMoney(interest) : '';
-  f.note.value = tx ? tx.description.slice(0, 100) : '';
+  f.note.value = tx ? hideNumbers(tx.description).slice(0, 100) : '';
   f.apply.checked = true;
   $('#paySplitNote').textContent = est ? 'Phần gốc / lãi đang điền theo ước tính. Sửa lại theo thông báo của ngân hàng nếu có.' : '';
   dlg.addEventListener('close', async () => {

@@ -87,8 +87,16 @@ export async function wipe() {
 export function accountLabel(acc) {
   if (!acc) return '';
   if (acc.name) return acc.name;
-  const tail = acc.accountNo ? ' ••' + acc.accountNo.slice(-4) : '';
-  return `${acc.bank || 'Tài khoản'} ${acc.type === 'credit' ? 'thẻ' : acc.type === 'bank' ? 'TK' : ''}${tail}`.replace(/\s+/g, ' ').trim();
+  // Không hiện số thẻ / số tài khoản: chỉ dùng tên ngân hàng và tên sản phẩm thẻ.
+  const base = autoName(acc);
+  const same = Object.values(data?.accounts || {}).filter((a) => !a.name && autoName(a) === base);
+  return same.length > 1 ? `${base} (${same.findIndex((a) => a.key === acc.key) + 1})` : base;
+}
+
+function autoName(a) {
+  if (a.type === 'credit') return `Thẻ ${a.bank || ''} ${(a.typeLabel || '').replace(/^Thẻ tín dụng\s*/i, '')}`.replace(/\s+/g, ' ').trim();
+  if (a.type === 'bank') return `TK ${a.bank || ''}`.trim();
+  return a.bank || a.typeLabel || 'Tài khoản';
 }
 
 export function addFamily(name) {
@@ -123,7 +131,7 @@ export async function importResult(r) {
     ...(r.statement && { statement: r.statement }), // thẻ tín dụng: hạn thanh toán, số phải trả, trả góp
   });
   await save();
-  return { added, dup };
+  return { added, dup, account: accKey };
 }
 
 export async function removeFile(fileId) {

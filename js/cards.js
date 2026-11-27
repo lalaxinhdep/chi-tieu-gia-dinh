@@ -2,7 +2,7 @@
 // Lấy từ sao kê mới nhất của mỗi thẻ (thông tin "statement" do bộ đọc PDF ghi lại khi nhập file).
 import * as store from './store.js';
 import { addMonths, daysBetween, today } from './loans.js';
-import { esc, fmtMoney, fmtDate, norm } from './util.js';
+import { esc, fmtMoney, fmtDate, norm, hideNumbers } from './util.js';
 
 const $ = (s) => document.querySelector(s);
 const money = (n) => (n == null ? '—' : `${fmtMoney(n)} đ`);
@@ -14,7 +14,7 @@ function guessItem(account, p, txs) {
   const near = (t) => t.account === account && Math.abs(Math.abs(t.amount) - target) <= p.periods + 1;
   const hit = txs.filter((t) => near(t) && t.amount < 0 && !/tra gop/.test(norm(t.description)))
     .sort((a, b) => (a.date < b.date ? 1 : -1))[0];
-  if (hit) return { item: hit.merchant || hit.description, date: hit.date };
+  if (hit) return { item: hideNumbers(hit.merchant || hit.description), date: hit.date };
   // Món mua nằm ở sao kê chưa nhập: ít nhất lấy ngày chuyển trả góp.
   const conv = txs.find((t) => near(t) && t.amount > 0 && /tra gop/.test(norm(t.description)));
   return conv ? { item: '', date: conv.date } : null;
@@ -113,7 +113,7 @@ function cardBlock(c, accLabel) {
   const instTotal = c.plans.reduce((a, p) => a + p.payment, 0);
   const instLeft = c.plans.reduce((a, p) => a + (p.outstanding || 0), 0);
   const rows = c.plans.map((p) => `<tr>
-      <td><div class="main">${esc(p.item || `Khoản trả góp ${fmtMoney(p.total)} đ`)}</div>
+      <td><div class="main">${esc(hideNumbers(p.item) || `Khoản trả góp ${fmtMoney(p.total)} đ`)}</div>
         <div class="inst-left">${p.remaining
           ? `Còn ${p.remaining} kỳ · ${money(p.outstanding)} · trả đến sao kê ${monthLabel(p.lastStatement)}${p.lastDue ? ` (hạn ≈ ${fmtDate(p.lastDue)})` : ''}`
           : 'Kỳ này là kỳ cuối'}</div>
